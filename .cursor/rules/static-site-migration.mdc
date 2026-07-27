@@ -1,0 +1,39 @@
+---
+description: Rules for migrating website_v1 static site to Next.js
+globs: uis/**/*,packages/shared/**/*
+alwaysApply: false
+---
+
+# Static Site → Next.js Migration
+
+Reference: `uis/website_v1/SPEC.md`, `memory-bank/rules/`.
+
+## Parity requirements
+
+Ship all five views with shared navbar/footer: Home, Catalog, Product, Cart, Checkout (3 steps).
+
+Preserve SEO from the reference (semantic HTML, meta tags, JSON-LD where present). Verify responsive layout at ~375px, ~768px, ~1280px.
+
+## Component extraction
+
+```tsx
+// ✅ GOOD — reusable, typed, shared chrome
+import type { Product } from '@repo/shared-types';
+
+export function ProductCard({ product }: { product: Product }) { ... }
+
+// ❌ BAD — inline duplicate schema
+interface Product { id: string; name: string; ... }
+```
+
+Extract: Navbar, Footer, ProductCard, CartLineItem, CheckoutSteps. Match design tokens from `website_v1` Tailwind config.
+
+## Data & backend
+
+- Use mock/placeholder product data until backend milestone.
+- Cart and checkout stay client-side or mocked — no payment API integration without explicit request.
+- When adding types, extend `packages/shared/types/index.ts`, not local duplicates.
+
+## Visual fidelity
+
+Carry forward colors (`navbase`, `oat`, `clay`, etc.), typography (Manrope/Spectral), and spacing. Do not redesign unless asked.

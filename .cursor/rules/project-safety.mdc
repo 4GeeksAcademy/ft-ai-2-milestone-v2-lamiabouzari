@@ -1,0 +1,23 @@
+---
+description: Core safety rules for this monorepo — scope, secrets, and memory bank
+alwaysApply: true
+---
+
+# Project Safety
+
+Read `memory-bank/rules/` before non-trivial work.
+
+## Hard rules
+
+1. **Do not modify `uis/website_v1/`** unless the user explicitly asks. It is the migration reference.
+2. **New UI work goes in `uis/website/`** (Next.js target), not in legacy folders.
+3. **No secrets** in commits — use `.env.example` with placeholders only.
+4. **Minimal scope** — no drive-by refactors, dependency upgrades, or unrelated file edits.
+5. **Shared types live in `packages/shared/types/`** — do not duplicate product schemas in the UI app.
+6. **Update `memory-bank/`** when making architectural decisions (see `memory-bank/rules/memory-bank-hygiene.md`).
+
+## Before finishing
+
+- Build/typecheck passes for touched packages.
+- Spec requirements in `uis/website_v1/SPEC.md` are not regressed.
+- Legacy reference tree untouched unless that was the task.
