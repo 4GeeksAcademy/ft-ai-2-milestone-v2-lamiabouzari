@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #1e252f;
+  --paper: #f4f6f8;
+  --panel: #ffffff;
+  --panel-soft: #eef2f6;
+  --line: #d4dde8;
+  --accent: #0f766e;
+  --accent-strong: #115e59;
+  --accent-soft: rgba(15, 118, 110, 0.12);
+  --metric-highlight: #9a3412;
+  --focus-ring: rgba(17, 94, 89, 0.42);
+}
+
+@theme inline {
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+  --color-panel: var(--panel);
+  --color-panel-soft: var(--panel-soft);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --font-sans: var(--font-source-sans), "Segoe UI", sans-serif;
+  --font-display: var(--font-bitter), "Times New Roman", serif;
+}
+
+body {
+  min-height: 100%;
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(circle at 100% -10%, rgba(17, 94, 89, 0.14), transparent 43%),
+    radial-gradient(circle at -5% 115%, rgba(154, 52, 18, 0.13), transparent 48%);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.backoffice-grid {
+  position: relative;
+}
+
+.backoffice-grid::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background-image: linear-gradient(to right, rgba(30, 37, 47, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(30, 37, 47, 0.04) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+
+.dashboard-card {
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: linear-gradient(165deg, var(--panel) 0%, #f8fafc 100%);
+  box-shadow: 0 10px 24px rgba(18, 33, 50, 0.06);
+}
+
+.metric-value {
+  color: var(--metric-highlight);
+  font-family: var(--font-display);
+}
+
+.reveal-up {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: revealUp 0.55s ease forwards;
+}
+
+.reveal-up-delay {
+  animation-delay: 0.14s;
+}
+
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@keyframes revealUp {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-up,
+  .reveal-up-delay {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

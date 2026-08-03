@@ -1,0 +1,6 @@
+
+uis/website/.next/
+uis/backoffice/.next/
+
+**/node_modules/
+**/.next/
