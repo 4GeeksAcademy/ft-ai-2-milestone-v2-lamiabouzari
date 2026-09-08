@@ -1,0 +1,44 @@
+services:
+  ui:
+    build:
+      context: ./uis
+      dockerfile: Dockerfile
+      additional_contexts:
+        repository: .
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    volumes:
+      - ./uis:/workspace/uis
+      - ./packages/shared:/workspace/packages/shared
+      - website_node_modules:/workspace/uis/website/node_modules
+      - backoffice_node_modules:/workspace/uis/backoffice/node_modules
+    networks:
+      - maison_atelier_network
+
+  backend:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./services:/app
+      - backend_data:/app/data
+      - backend_backups:/app/backups
+    networks:
+      - maison_atelier_network
+
+volumes:
+  website_node_modules:
+  backoffice_node_modules:
+  backend_data:
+  backend_backups:
+
+networks:
+  maison_atelier_network:
+    name: maison_atelier_network
