@@ -4,3 +4,7 @@ uis/backoffice/.next/
 
 **/node_modules/
 **/.next/
+.env
+
+__pycache__/
+*.py[cod]
