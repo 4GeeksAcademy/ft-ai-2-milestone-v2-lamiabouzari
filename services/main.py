@@ -25,7 +25,7 @@ from exceptions import (
     generic_exception_handler,
     request_validation_exception_handler,
 )
-from routers import auth, profiles, users
+from routers import auth, profiles, telemetry, users
 
 
 @asynccontextmanager
@@ -73,6 +73,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(profiles.router)
+app.include_router(telemetry.router)
 
 @app.get("/health")
 def health_check() -> dict:
