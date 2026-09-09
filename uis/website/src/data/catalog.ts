@@ -18,6 +18,9 @@ export const products: Product[] = [
     categoryLabel: "Blazer",
     sizes: ["xs", "s", "m", "l", "xl"],
     displaySize: "m",
+    image:
+      "https://images.unsplash.com/photo-1617127365659-c47fa864d8bc?auto=format&fit=crop&w=1200&q=80",
+    imageAlt: "Greige tailored wool blazer",
     listTags: ["new-arrival"],
   },
   {
@@ -32,6 +35,9 @@ export const products: Product[] = [
     categoryLabel: "Men's Shirt",
     sizes: ["s", "m", "l", "xl"],
     displaySize: "m",
+    image:
+      "https://upload.wikimedia.org/wikipedia/commons/6/6d/Dress_Wear_styles_Bangladesh_-_Mens_poplin_shirts.jpg",
+    imageAlt: "Men's poplin shirt assortment",
     listTags: ["new-arrival"],
   },
   {
@@ -46,6 +52,9 @@ export const products: Product[] = [
     categoryLabel: "Pants",
     sizes: ["xs", "s", "m", "l", "xl"],
     displaySize: "m",
+    image:
+      "https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?auto=format&fit=crop&w=900&q=80",
+    imageAlt: "Relaxed pleated trousers",
     listTags: ["new-arrival"],
   },
   {
@@ -60,6 +69,9 @@ export const products: Product[] = [
     categoryLabel: "Footwear",
     sizes: ["38", "40", "42", "44"],
     displaySize: "42",
+    image:
+      "https://images.unsplash.com/photo-1490114538077-0a7f8cb49891?auto=format&fit=crop&w=900&q=80",
+    imageAlt: "Brown leather loafers",
     listTags: ["new-arrival"],
   },
   {
@@ -74,6 +86,9 @@ export const products: Product[] = [
     categoryLabel: "Jacket",
     sizes: ["s", "m", "l", "xl"],
     displaySize: "m",
+    image:
+      "https://upload.wikimedia.org/wikipedia/commons/3/30/Utility_Shirt_Jacket.jpg",
+    imageAlt: "Utility shirt jacket in cotton blend",
     listTags: ["best-seller"],
   },
   {
@@ -88,6 +103,9 @@ export const products: Product[] = [
     categoryLabel: "Men's Shirt",
     sizes: ["s", "m", "l"],
     displaySize: "m",
+    image:
+      "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=80",
+    imageAlt: "Blue oxford button-down shirt",
     listTags: ["best-seller"],
   },
   {
@@ -102,6 +120,9 @@ export const products: Product[] = [
     categoryLabel: "Pants",
     sizes: ["xs", "s", "m", "l"],
     displaySize: "s",
+    image:
+      "https://images.unsplash.com/photo-1521577352947-9bb58764b69a?auto=format&fit=crop&w=900&q=80",
+    imageAlt: "Pleated pants with tapered silhouette",
     listTags: ["best-seller"],
   },
   {
@@ -116,6 +137,9 @@ export const products: Product[] = [
     categoryLabel: "Accessory",
     sizes: ["one-size"],
     displaySize: "one-size",
+    image:
+      "https://upload.wikimedia.org/wikipedia/commons/c/c1/Canvas_two-tone_tote_Navy_and_Natural7_%289038437258%29.jpg",
+    imageAlt: "Two-tone canvas weekender tote",
     listTags: ["best-seller"],
   },
   {
@@ -161,6 +185,9 @@ export const products: Product[] = [
     categoryLabel: "Men's Shirt",
     sizes: ["s", "m", "l"],
     displaySize: "s",
+    image:
+      "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=80",
+    imageAlt: "Chambray shirt with matte buttons",
   },
   {
     id: "prod_belleville-silk-blouse",
@@ -174,6 +201,9 @@ export const products: Product[] = [
     categoryLabel: "Women's Shirt",
     sizes: ["xs", "s", "m", "l"],
     displaySize: "xs",
+    image:
+      "https://upload.wikimedia.org/wikipedia/commons/3/31/1965_Chanel_suit_and_silk_blouse_detail.jpg",
+    imageAlt: "Silk blouse with fluid drape",
   },
   {
     id: "prod_louvre-linen-shirt",
@@ -187,6 +217,9 @@ export const products: Product[] = [
     categoryLabel: "Men's Shirt",
     sizes: ["m", "l", "xl"],
     displaySize: "xl",
+    image:
+      "https://images.unsplash.com/photo-1516826957135-700dedea698c?auto=format&fit=crop&w=900&q=80",
+    imageAlt: "Linen shirt in warm neutral tone",
   },
   {
     id: "prod_chino-sable",
@@ -216,6 +249,9 @@ export const products: Product[] = [
     categoryLabel: "Pants",
     sizes: ["s", "m", "l"],
     displaySize: "m",
+    image:
+      "https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?auto=format&fit=crop&w=900&q=80",
+    imageAlt: "Slate pleated trousers",
   },
   {
     id: "prod_relaxed-cotton-trousers",
@@ -245,6 +281,9 @@ export const products: Product[] = [
     categoryLabel: "Footwear",
     sizes: ["38", "40", "42", "44"],
     displaySize: "40",
+    image:
+      "https://images.unsplash.com/photo-1490114538077-0a7f8cb49891?auto=format&fit=crop&w=900&q=80",
+    imageAlt: "Espresso brown leather loafers",
   },
   {
     id: "prod_concorde-derby",
@@ -258,6 +297,9 @@ export const products: Product[] = [
     categoryLabel: "Footwear",
     sizes: ["40", "42", "44"],
     displaySize: "42",
+    image:
+      "https://upload.wikimedia.org/wikipedia/commons/f/f0/Shoe-Blucher-Black_with_rubber_sole.jpg",
+    imageAlt: "Black leather derby shoe",
   },
   {
     id: "prod_derbies-cuir-noir",
@@ -272,8 +314,8 @@ export const products: Product[] = [
     sizes: ["40", "42", "44"],
     displaySize: "42",
     image:
-      "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=900&q=80",
-    imageAlt: "Black leather derby shoes",
+      "https://upload.wikimedia.org/wikipedia/commons/9/92/Leather_shoes_4_man.JPG",
+    imageAlt: "Pair of black leather derby shoes",
   },
   {
     id: "prod_tuileries-handbag",
@@ -287,6 +329,9 @@ export const products: Product[] = [
     categoryLabel: "Accessory",
     sizes: ["one-size"],
     displaySize: "one-size",
+    image:
+      "https://cdn.dummyjson.com/product-images/womens-bags/heshe-women's-leather-bag/thumbnail.webp",
+    imageAlt: "Structured tan leather handbag",
   },
   {
     id: "prod_passy-silk-necktie",
@@ -300,6 +345,9 @@ export const products: Product[] = [
     categoryLabel: "Accessory",
     sizes: ["one-size"],
     displaySize: "one-size",
+    image:
+      "https://upload.wikimedia.org/wikipedia/commons/2/2f/L85HS09_blake_vincent_blue_striped_silk_necktie_2.jpg",
+    imageAlt: "Navy silk necktie with subtle stripe motif",
   },
   {
     id: "prod_textured-linen-overshirt",

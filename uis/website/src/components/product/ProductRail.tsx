@@ -29,7 +29,7 @@ export function ProductRail({
         </Link>
       </div>
       <ul
-        className="horizontal-rail flex snap-x gap-4 overflow-x-auto pb-2"
+        className="horizontal-rail flex snap-x gap-4 overflow-x-auto pb-2 pr-6"
         aria-label={`${title} products`}
       >
         {products.map((product) => (

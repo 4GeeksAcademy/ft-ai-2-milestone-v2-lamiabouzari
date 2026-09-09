@@ -1,0 +1,40 @@
+import type { CartLine } from "@repo/shared-types";
+
+export const dashboardCartLines: readonly CartLine[] = [
+  {
+    id: "line-1",
+    productId: "product-oxford-shirt",
+    name: "Oxford Day Shirt",
+    code: "MAR-OS-001",
+    image: "/placeholders/oxford-shirt.jpg",
+    imageAlt: "Oxford Day Shirt",
+    unitPrice: 128,
+    currency: "EUR",
+    quantity: 5,
+    size: "M",
+  },
+  {
+    id: "line-2",
+    productId: "product-city-trouser",
+    name: "City Pleat Trouser",
+    code: "MAR-CP-014",
+    image: "/placeholders/city-trouser.jpg",
+    imageAlt: "City Pleat Trouser",
+    unitPrice: 164,
+    currency: "EUR",
+    quantity: 3,
+    size: "42",
+  },
+  {
+    id: "line-3",
+    productId: "product-leather-derby",
+    name: "Soft Derby Leather",
+    code: "MAR-SD-020",
+    image: "/placeholders/soft-derby.jpg",
+    imageAlt: "Soft Derby Leather",
+    unitPrice: 219,
+    currency: "EUR",
+    quantity: 2,
+    size: "44",
+  },
+] as const;
