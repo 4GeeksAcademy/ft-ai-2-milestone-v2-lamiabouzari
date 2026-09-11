@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
+from sqlalchemy.pool import NullPool
+from sqlmodel import Session, SQLModel, create_engine
 from tinydb import TinyDB
 from tinydb.table import Document
 
@@ -155,3 +157,43 @@ def backup_db() -> Path:
     dst = backups_dir / f"db_backup_{timestamp}.json"
     copy2(src, dst)
     return dst
+
+
+# ---------------------------------------------------------------------------
+# Inventory database (Postgres via SQLModel) — separate from the TinyDB
+# user/auth database above. Names are prefixed with ``inventory_`` to avoid
+# any collision with the TinyDB helpers (``get_db``/``backup_db``).
+# ---------------------------------------------------------------------------
+
+_inventory_engine = None
+
+
+def get_inventory_engine():
+    """Return the singleton SQLAlchemy engine for the inventory database."""
+    global _inventory_engine
+    if _inventory_engine is None:
+        if not settings.database_url:
+            raise RuntimeError(
+                "DATABASE_URL is not configured; inventory endpoints require "
+                "a Postgres connection string."
+            )
+        _inventory_engine = create_engine(
+            settings.database_url,
+            echo=False,
+            poolclass=NullPool,
+            connect_args={"prepare_threshold": None},
+        )
+    return _inventory_engine
+
+
+def create_inventory_db_and_tables() -> None:
+    """Create the relational inventory tables when they do not exist."""
+    from models.inventory import SKU, StockEntry, StockExit  # noqa: F401
+
+    SQLModel.metadata.create_all(get_inventory_engine())
+
+
+def get_inventory_db():
+    """Yield a SQLModel session for one FastAPI request (inventory only)."""
+    with Session(get_inventory_engine()) as session:
+        yield session
