@@ -177,11 +177,18 @@ def get_inventory_engine():
                 "DATABASE_URL is not configured; inventory endpoints require "
                 "a Postgres connection string."
             )
+        # ``prepare_threshold`` is a psycopg (PostgreSQL) driver option and is
+        # invalid for SQLite/other drivers, so only pass it for Postgres URLs.
+        connect_args = (
+            {"prepare_threshold": None}
+            if settings.database_url.startswith("postgresql")
+            else {}
+        )
         _inventory_engine = create_engine(
             settings.database_url,
             echo=False,
             poolclass=NullPool,
-            connect_args={"prepare_threshold": None},
+            connect_args=connect_args,
         )
     return _inventory_engine
 
