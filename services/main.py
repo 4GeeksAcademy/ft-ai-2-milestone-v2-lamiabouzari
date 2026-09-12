@@ -18,14 +18,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
-from database import backup_db, get_db
+from database import backup_db, create_inventory_db_and_tables, get_db
 from exceptions import (
     AppException,
     app_exception_handler,
     generic_exception_handler,
     request_validation_exception_handler,
 )
-from routers import auth, profiles, telemetry, users
+from routers import auth, inventory, profiles, telemetry, users
 
 
 @asynccontextmanager
@@ -33,6 +33,9 @@ async def lifespan(_app: FastAPI):
     """Application lifespan — runs on startup and shutdown."""
     # Startup: ensure the database is initialised
     get_db()
+    # Inventory tables only apply when a Postgres DATABASE_URL is configured
+    if settings.database_url:
+        create_inventory_db_and_tables()
     yield
     # Shutdown: create a backup
     try:
@@ -73,6 +76,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(profiles.router)
+app.include_router(inventory.router)
 app.include_router(telemetry.router)
 
 @app.get("/health")
