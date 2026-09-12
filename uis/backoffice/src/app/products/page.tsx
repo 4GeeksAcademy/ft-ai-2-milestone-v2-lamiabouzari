@@ -14,6 +14,7 @@ import {
   type Product,
   type Warehouse,
 } from "@/lib/inventory";
+import { telemetryService } from "@/services/telemetry";
 
 export default function ProductsPage() {
   return (
@@ -76,6 +77,11 @@ function ProductsPageContent() {
     setSubmitting(true);
     try {
       await createProduct(form);
+      telemetryService.track("product_created", {
+        sku: form.sku,
+        category: form.category,
+        warehouse: form.warehouse,
+      });
       setFormSuccess(`SKU "${form.sku}" created successfully.`);
       setForm({ name: "", sku: "", client_name: "", category: "fashion", warehouse: "LA" });
       await loadProducts();

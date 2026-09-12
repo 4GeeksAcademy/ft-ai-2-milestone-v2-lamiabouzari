@@ -5,6 +5,7 @@ import { RequireAuth } from "@/components/auth/RequireAuth";
 import { StateMessage } from "@/components/ui/StateMessage";
 import { ApiError } from "@/lib/api-client";
 import { createInboundOrder, listProducts, type Product } from "@/lib/inventory";
+import { telemetryService } from "@/services/telemetry";
 
 export default function InboundOrdersPage() {
   return (
@@ -54,6 +55,12 @@ function InboundOrdersPageContent() {
         sku_id: selectedProduct.id,
         quantity,
         reference,
+        warehouse: selectedProduct.warehouse,
+      });
+      telemetryService.track("inbound_order_created", {
+        sku: selectedProduct.sku,
+        product_id: selectedProduct.id,
+        quantity,
         warehouse: selectedProduct.warehouse,
       });
       setFormSuccess(`Inbound order for "${selectedProduct.sku}" recorded successfully.`);
