@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     jwt_reset_token_expiry_minutes: int = Field(default=15, ge=15, le=60)
     cors_origins: list[str] = ["http://localhost:3000"]
     frontend_base_url: str = "http://localhost:3000"
+    telemetry_endpoint: str = "/telemetry/events"
     resend_api_key: str | None = None
     resend_from_email: str = "onboarding@resend.dev"
 

@@ -1,0 +1,513 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TrackFlow Telemetry Event Schemas",
+  "schemaVersion": "1.0.0",
+  "description": "Canonical event catalogue for TrackFlow telemetry. Every event is wrapped in the standard envelope; event-specific fields live under properties.",
+  "event_types": [
+    "inbound_order_created",
+    "outbound_order_created",
+    "stock_threshold_triggered",
+    "direct_stock_edit_rejected",
+    "inventory_discrepancy_detected",
+    "inventory_count_recorded",
+    "user_login_succeeded",
+    "user_login_failed",
+    "permission_denied",
+    "api_request_failed",
+    "background_job_failed",
+    "page_load_measured",
+    "search_query_executed",
+    "backoffice_page_viewed",
+    "order_creation_abandoned",
+    "report_export_requested"
+  ],
+  "envelope": {
+    "description": "Standard envelope for every TrackFlow telemetry event.",
+    "type": "object",
+    "properties": {
+      "eventId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier of this event instance."
+      },
+      "timestamp": {
+        "type": "string",
+        "format": "date-time",
+        "description": "ISO 8601 UTC timestamp when the event occurred."
+      },
+      "sessionId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "User session identifier for the same journey."
+      },
+      "userId": {
+        "type": "string",
+        "description": "Stable internal user identifier of the acting user."
+      },
+      "event_type": {
+        "type": "string",
+        "description": "Canonical snake_case event name."
+      },
+      "schemaVersion": {
+        "type": "string",
+        "description": "Semver of the event schema used to produce the payload."
+      },
+      "requestId": {
+        "type": ["string", "null"],
+        "format": "uuid",
+        "description": "Correlation ID for the backend request or trace."
+      },
+      "properties": {
+        "type": "object",
+        "description": "Event-specific payload defined by the event allowlist."
+      }
+    },
+    "required": [
+      "eventId",
+      "timestamp",
+      "sessionId",
+      "userId",
+      "event_type",
+      "schemaVersion",
+      "requestId",
+      "properties"
+    ],
+    "additionalProperties": false
+  },
+  "enums": {
+    "warehouse": ["los_angeles", "zaragoza"],
+    "product_category": ["fashion", "electronics", "cosmetics"]
+  },
+  "events": {
+    "inbound_order_created": {
+      "category": "inventory",
+      "classification": "mandatory",
+      "description": "A new inbound order (stock receipt) was created for a client's SKU at a warehouse.",
+      "delivery": "batch",
+      "hypothesis": "We need to understand how stock enters each warehouse, by client and category.",
+      "decision": "Forecast receiving capacity and staffing needs.",
+      "allowlist": [
+        { "property": "warehouse", "type": "enum", "allowed_values": ["los_angeles", "zaragoza"], "required": true },
+        { "property": "client_id", "type": "string", "required": true },
+        { "property": "product_id", "type": "string", "required": true },
+        { "property": "product_category", "type": "enum", "allowed_values": ["fashion", "electronics", "cosmetics"], "required": true },
+        { "property": "quantity", "type": "integer", "minimum": 1, "required": true },
+        { "property": "order_id", "type": "string", "required": true },
+        { "property": "source_type", "type": "enum", "allowed_values": ["purchase_order", "return", "transfer"], "required": false }
+      ],
+      "business_justification": "This event records inbound stock movement at the ledger level, which supports receiving analysis, capacity planning, and operational forecasting.",
+      "sensitive_handling": "No carrier, recipient, or credential material is collected. Only opaque internal identifiers are used.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "warehouse": { "type": "string", "enum": ["los_angeles", "zaragoza"] },
+          "client_id": { "type": "string" },
+          "product_id": { "type": "string" },
+          "product_category": { "type": "string", "enum": ["fashion", "electronics", "cosmetics"] },
+          "quantity": { "type": "integer", "minimum": 1 },
+          "order_id": { "type": "string" },
+          "source_type": { "type": "string", "enum": ["purchase_order", "return", "transfer"] }
+        },
+        "required": ["warehouse", "client_id", "product_id", "product_category", "quantity", "order_id"],
+        "additionalProperties": false
+      }
+    },
+    "outbound_order_created": {
+      "category": "inventory",
+      "classification": "mandatory",
+      "description": "A new outbound order (stock dispatch) was created for a client's SKU at a warehouse.",
+      "delivery": "batch",
+      "hypothesis": "We need to know outbound velocity by warehouse, client, and category.",
+      "decision": "Prioritize replenishment planning and picking resources.",
+      "allowlist": [
+        { "property": "warehouse", "type": "enum", "allowed_values": ["los_angeles", "zaragoza"], "required": true },
+        { "property": "client_id", "type": "string", "required": true },
+        { "property": "product_id", "type": "string", "required": true },
+        { "property": "product_category", "type": "enum", "allowed_values": ["fashion", "electronics", "cosmetics"], "required": true },
+        { "property": "quantity", "type": "integer", "minimum": 1, "required": true },
+        { "property": "order_id", "type": "string", "required": true },
+        { "property": "destination_type", "type": "enum", "allowed_values": ["customer_shipment", "return_to_supplier", "transfer"], "required": false }
+      ],
+      "business_justification": "Batch-level dispatch telemetry supports demand analysis and operational planning without exposing carrier or recipient details.",
+      "sensitive_handling": "No carrier data or recipient/end-consumer personal data is collected. `destination_type` is an internal classification only.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "warehouse": { "type": "string", "enum": ["los_angeles", "zaragoza"] },
+          "client_id": { "type": "string" },
+          "product_id": { "type": "string" },
+          "product_category": { "type": "string", "enum": ["fashion", "electronics", "cosmetics"] },
+          "quantity": { "type": "integer", "minimum": 1 },
+          "order_id": { "type": "string" },
+          "destination_type": { "type": "string", "enum": ["customer_shipment", "return_to_supplier", "transfer"] }
+        },
+        "required": ["warehouse", "client_id", "product_id", "product_category", "quantity", "order_id"],
+        "additionalProperties": false
+      }
+    },
+    "stock_threshold_triggered": {
+      "category": "inventory",
+      "classification": "mandatory",
+      "description": "A SKU's stock level crossed a configured minimum threshold at a warehouse.",
+      "delivery": "stream",
+      "hypothesis": "We need to know when a SKU is near or below the inventory floor threshold.",
+      "decision": "Trigger replenishment before fulfillment is disrupted.",
+      "allowlist": [
+        { "property": "warehouse", "type": "enum", "allowed_values": ["los_angeles", "zaragoza"], "required": true },
+        { "property": "client_id", "type": "string", "required": true },
+        { "property": "product_id", "type": "string", "required": true },
+        { "property": "product_category", "type": "enum", "allowed_values": ["fashion", "electronics", "cosmetics"], "required": true },
+        { "property": "quantity", "type": "integer", "minimum": 0, "required": true },
+        { "property": "threshold_value", "type": "integer", "required": true }
+      ],
+      "business_justification": "Stockout-risk signals need near-real-time visibility so replenishment teams can act before service disruption occurs.",
+      "sensitive_handling": "No personal data is collected; only warehouse, client, product, and threshold metadata are logged.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "warehouse": { "type": "string", "enum": ["los_angeles", "zaragoza"] },
+          "client_id": { "type": "string" },
+          "product_id": { "type": "string" },
+          "product_category": { "type": "string", "enum": ["fashion", "electronics", "cosmetics"] },
+          "quantity": { "type": "integer", "minimum": 0 },
+          "threshold_value": { "type": "integer" }
+        },
+        "required": ["warehouse", "client_id", "product_id", "product_category", "quantity", "threshold_value"],
+        "additionalProperties": false
+      }
+    },
+    "direct_stock_edit_rejected": {
+      "category": "inventory",
+      "classification": "mandatory",
+      "description": "An attempt to modify stock directly (bypassing InboundOrder/OutboundOrder) was rejected.",
+      "delivery": "stream",
+      "hypothesis": "We need to detect and quantify attempts to bypass the approved inventory workflow.",
+      "decision": "Enforce process controls and access restrictions when direct stock edits are attempted.",
+      "allowlist": [
+        { "property": "warehouse", "type": "enum", "allowed_values": ["los_angeles", "zaragoza"], "required": true },
+        { "property": "client_id", "type": "string", "required": true },
+        { "property": "product_id", "type": "string", "required": true },
+        { "property": "product_category", "type": "enum", "allowed_values": ["fashion", "electronics", "cosmetics"], "required": true },
+        { "property": "quantity", "type": "integer", "required": true },
+        { "property": "attempted_by_user_id", "type": "string", "required": true },
+        { "property": "rejection_reason", "type": "string", "required": false }
+      ],
+      "business_justification": "This is a security and integrity event that must be surfaced promptly to control misuse and protect inventory accuracy.",
+      "sensitive_handling": "No personal identifiers beyond an internal stable user ID are included. No credentials or tokens are recorded.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "warehouse": { "type": "string", "enum": ["los_angeles", "zaragoza"] },
+          "client_id": { "type": "string" },
+          "product_id": { "type": "string" },
+          "product_category": { "type": "string", "enum": ["fashion", "electronics", "cosmetics"] },
+          "quantity": { "type": "integer" },
+          "attempted_by_user_id": { "type": "string" },
+          "rejection_reason": { "type": "string" }
+        },
+        "required": ["warehouse", "client_id", "product_id", "product_category", "quantity", "attempted_by_user_id"],
+        "additionalProperties": false
+      }
+    },
+    "inventory_discrepancy_detected": {
+      "category": "inventory",
+      "classification": "mandatory",
+      "description": "A stock reconciliation or audit process detected a mismatch between expected and counted stock for a SKU.",
+      "delivery": "batch",
+      "hypothesis": "We need to understand where and how often expected stock diverges from actual stock.",
+      "decision": "Prioritize audits and root-cause analysis for reconciliation issues.",
+      "allowlist": [
+        { "property": "warehouse", "type": "enum", "allowed_values": ["los_angeles", "zaragoza"], "required": true },
+        { "property": "client_id", "type": "string", "required": true },
+        { "property": "product_id", "type": "string", "required": true },
+        { "property": "product_category", "type": "enum", "allowed_values": ["fashion", "electronics", "cosmetics"], "required": true },
+        { "property": "quantity", "type": "integer", "required": true },
+        { "property": "expected_quantity", "type": "integer", "required": true },
+        { "property": "actual_quantity", "type": "integer", "required": true }
+      ],
+      "business_justification": "Reconciliation mismatches are evaluated in audit cycles and operational reporting rather than as immediate per-event alerts.",
+      "sensitive_handling": "No personal data, carrier metadata, or recipient details are included.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "warehouse": { "type": "string", "enum": ["los_angeles", "zaragoza"] },
+          "client_id": { "type": "string" },
+          "product_id": { "type": "string" },
+          "product_category": { "type": "string", "enum": ["fashion", "electronics", "cosmetics"] },
+          "quantity": { "type": "integer" },
+          "expected_quantity": { "type": "integer" },
+          "actual_quantity": { "type": "integer" }
+        },
+        "required": ["warehouse", "client_id", "product_id", "product_category", "quantity", "expected_quantity", "actual_quantity"],
+        "additionalProperties": false
+      }
+    },
+    "inventory_count_recorded": {
+      "category": "inventory",
+      "classification": "additional",
+      "description": "A physical inventory count for a SKU is recorded during an audit or cycle count.",
+      "delivery": "batch",
+      "hypothesis": "We need to know which SKUs are actually being physically counted and how frequently audit coverage occurs.",
+      "decision": "Prioritize audit schedules and warehouse resources for SKUs or locations that are not being counted frequently enough.",
+      "allowlist": [
+        { "property": "warehouse", "type": "enum", "allowed_values": ["los_angeles", "zaragoza"], "required": true },
+        { "property": "client_id", "type": "string", "required": true },
+        { "property": "product_id", "type": "string", "required": true },
+        { "property": "product_category", "type": "enum", "allowed_values": ["fashion", "electronics", "cosmetics"], "required": true },
+        { "property": "quantity", "type": "integer", "required": true }
+      ],
+      "business_justification": "This event records a physical inventory count taken during an audit or cycle count. It does not modify stock and supports warehouse audit coverage analysis.",
+      "sensitive_handling": "No personal or carrier data is collected. Only audit context and inventory identifiers are retained.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "warehouse": { "type": "string", "enum": ["los_angeles", "zaragoza"] },
+          "client_id": { "type": "string" },
+          "product_id": { "type": "string" },
+          "product_category": { "type": "string", "enum": ["fashion", "electronics", "cosmetics"] },
+          "quantity": { "type": "integer" }
+        },
+        "required": ["warehouse", "client_id", "product_id", "product_category", "quantity"],
+        "additionalProperties": false
+      }
+    },
+    "user_login_succeeded": {
+      "category": "security",
+      "classification": "additional",
+      "description": "An internal user successfully authenticated.",
+      "delivery": "batch",
+      "hypothesis": "We need to understand usage patterns and access volume across internal users.",
+      "decision": "Right-size licensing and detect unusual access patterns.",
+      "allowlist": [
+        { "property": "auth_method", "type": "enum", "allowed_values": ["password", "sso", "mfa"], "required": true },
+        { "property": "warehouse", "type": "enum", "allowed_values": ["los_angeles", "zaragoza"], "required": false }
+      ],
+      "business_justification": "This gives a usage baseline for monitoring access patterns and changes in system adoption.",
+      "sensitive_handling": "The event records only the authentication method and optional site context. No password, token, or credential material is collected.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "auth_method": { "type": "string", "enum": ["password", "sso", "mfa"] },
+          "warehouse": { "type": "string", "enum": ["los_angeles", "zaragoza"] }
+        },
+        "required": ["auth_method"],
+        "additionalProperties": false
+      }
+    },
+    "user_login_failed": {
+      "category": "security",
+      "classification": "additional",
+      "description": "A login attempt failed.",
+      "delivery": "stream",
+      "hypothesis": "We need to detect repeated failed authentication attempts and potential attack patterns.",
+      "decision": "Trigger lockout workflows and security review.",
+      "allowlist": [
+        { "property": "auth_method", "type": "enum", "allowed_values": ["password", "sso", "mfa"], "required": true },
+        { "property": "failure_reason", "type": "enum", "allowed_values": ["invalid_credentials", "account_locked", "mfa_failed", "unknown"], "required": true }
+      ],
+      "business_justification": "Failed logins are a near-real-time security signal that should be examined quickly to prevent brute force or takeover attempts.",
+      "sensitive_handling": "No credentials, tokens, or raw password values are recorded.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "auth_method": { "type": "string", "enum": ["password", "sso", "mfa"] },
+          "failure_reason": { "type": "string", "enum": ["invalid_credentials", "account_locked", "mfa_failed", "unknown"] }
+        },
+        "required": ["auth_method", "failure_reason"],
+        "additionalProperties": false
+      }
+    },
+    "permission_denied": {
+      "category": "security",
+      "classification": "additional",
+      "description": "An action was attempted without the required authorization.",
+      "delivery": "stream",
+      "hypothesis": "We need to measure authorization failures and identify misconfigured roles or probing attempts.",
+      "decision": "Adjust role policy or investigate suspicious behavior.",
+      "allowlist": [
+        { "property": "resource_type", "type": "string", "required": true },
+        { "property": "action", "type": "string", "required": true }
+      ],
+      "business_justification": "Permission denials are a security signal and should be visible quickly for operational review.",
+      "sensitive_handling": "No user names, address details, or credential material are stored.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "resource_type": { "type": "string" },
+          "action": { "type": "string" }
+        },
+        "required": ["resource_type", "action"],
+        "additionalProperties": false
+      }
+    },
+    "api_request_failed": {
+      "category": "errors",
+      "classification": "additional",
+      "description": "A backend API request returned an error after retries were exhausted.",
+      "delivery": "stream",
+      "hypothesis": "We need to identify which API surfaces fail most often and under what conditions.",
+      "decision": "Prioritize endpoint reliability fixes and infrastructure investments.",
+      "allowlist": [
+        { "property": "endpoint", "type": "string", "required": true },
+        { "property": "http_status", "type": "integer", "required": true },
+        { "property": "error_code", "type": "string", "required": false }
+      ],
+      "business_justification": "API failures require prompt detection to support incident response and reliable service operations.",
+      "sensitive_handling": "No request payload or user content is logged. Only route and status metadata are retained.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "endpoint": { "type": "string" },
+          "http_status": { "type": "integer" },
+          "error_code": { "type": "string" }
+        },
+        "required": ["endpoint", "http_status"],
+        "additionalProperties": false
+      }
+    },
+    "background_job_failed": {
+      "category": "errors",
+      "classification": "additional",
+      "description": "A scheduled background job failed to complete.",
+      "delivery": "batch",
+      "hypothesis": "We need to know which scheduled or asynchronous jobs fail and how frequently.",
+      "decision": "Prioritize fixes to the jobs protecting stock accuracy and operational integrity.",
+      "allowlist": [
+        { "property": "job_name", "type": "string", "required": true },
+        { "property": "error_code", "type": "string", "required": false }
+      ],
+      "business_justification": "Scheduled job failures are operationally important but generally reviewed in aggregate rather than processed as a per-event real-time alert.",
+      "sensitive_handling": "No personal data or credentials are recorded.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "job_name": { "type": "string" },
+          "error_code": { "type": "string" }
+        },
+        "required": ["job_name"],
+        "additionalProperties": false
+      }
+    },
+    "page_load_measured": {
+      "category": "performance",
+      "classification": "additional",
+      "description": "A backoffice page finished loading and recorded its load duration.",
+      "delivery": "batch",
+      "hypothesis": "We need to know which screens are slowest for internal users.",
+      "decision": "Prioritize front-end optimization on the pages with the worst performance.",
+      "allowlist": [
+        { "property": "page_name", "type": "string", "required": true },
+        { "property": "duration_ms", "type": "integer", "minimum": 0, "required": true }
+      ],
+      "business_justification": "Performance trends are gathered in aggregate and sampled to manage volume while preserving visibility into slow pages.",
+      "sensitive_handling": "No user content, personal identifiers, or raw URLs with query parameters are stored.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "page_name": { "type": "string" },
+          "duration_ms": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["page_name", "duration_ms"],
+        "additionalProperties": false
+      }
+    },
+    "search_query_executed": {
+      "category": "performance",
+      "classification": "additional",
+      "description": "A user executed a search or filter in the backoffice.",
+      "delivery": "batch",
+      "hypothesis": "We need to know how users search for inventory and operational data, without collecting the raw query text.",
+      "decision": "Improve search UX and indexing for the most common query patterns.",
+      "allowlist": [
+        { "property": "search_context", "type": "enum", "allowed_values": ["inventory", "orders", "clients"], "required": true },
+        { "property": "result_count", "type": "integer", "minimum": 0, "required": true },
+        { "property": "duration_ms", "type": "integer", "minimum": 0, "required": false }
+      ],
+      "business_justification": "Search telemetry supports product UX decisions and indexing improvements while avoiding incidental PII capture.",
+      "sensitive_handling": "Raw free-text queries are not recorded. Only context and result metrics are captured.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "search_context": { "type": "string", "enum": ["inventory", "orders", "clients"] },
+          "result_count": { "type": "integer", "minimum": 0 },
+          "duration_ms": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["search_context", "result_count"],
+        "additionalProperties": false
+      }
+    },
+    "backoffice_page_viewed": {
+      "category": "navigation",
+      "classification": "additional",
+      "description": "A user navigated to a backoffice screen.",
+      "delivery": "batch",
+      "hypothesis": "We need to understand which backoffice screens are used most often and where users spend time.",
+      "decision": "Prioritize UX and process changes based on actual adoption patterns.",
+      "allowlist": [
+        { "property": "page_name", "type": "string", "required": true },
+        { "property": "referrer_page_name", "type": "string", "required": false }
+      ],
+      "business_justification": "High-volume page-view telemetry is best handled in aggregated batches and debounced to preserve signal while limiting noise.",
+      "sensitive_handling": "No names, emails, or URL parameters with user data are recorded.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "page_name": { "type": "string" },
+          "referrer_page_name": { "type": "string" }
+        },
+        "required": ["page_name"],
+        "additionalProperties": false
+      }
+    },
+    "order_creation_abandoned": {
+      "category": "navigation",
+      "classification": "additional",
+      "description": "A user started creating an inbound or outbound order but left before submission.",
+      "delivery": "batch",
+      "hypothesis": "We need to identify where users abandon order creation flows.",
+      "decision": "Reduce friction in the creation process and improve conversion at the abandonment point.",
+      "allowlist": [
+        { "property": "order_type", "type": "enum", "allowed_values": ["inbound", "outbound"], "required": true },
+        { "property": "last_step_reached", "type": "string", "required": true },
+        { "property": "warehouse", "type": "enum", "allowed_values": ["los_angeles", "zaragoza"], "required": false }
+      ],
+      "business_justification": "Funnel analysis is aggregated and reviewed in batches rather than as a real-time operational alert.",
+      "sensitive_handling": "No recipient or carrier details are included.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "order_type": { "type": "string", "enum": ["inbound", "outbound"] },
+          "last_step_reached": { "type": "string" },
+          "warehouse": { "type": "string", "enum": ["los_angeles", "zaragoza"] }
+        },
+        "required": ["order_type", "last_step_reached"],
+        "additionalProperties": false
+      }
+    },
+    "report_export_requested": {
+      "category": "navigation",
+      "classification": "additional",
+      "description": "A user requested an export of inventory or order data from the backoffice.",
+      "delivery": "batch",
+      "hypothesis": "We need to know which reports are exported most often by internal users.",
+      "decision": "Prioritize native dashboard or export feature investment based on actual demand.",
+      "allowlist": [
+        { "property": "report_type", "type": "enum", "allowed_values": ["inventory_summary", "order_history", "discrepancy_audit"], "required": true },
+        { "property": "export_format", "type": "enum", "allowed_values": ["csv", "pdf"], "required": true },
+        { "property": "warehouse", "type": "enum", "allowed_values": ["los_angeles", "zaragoza"], "required": false }
+      ],
+      "business_justification": "Export usage is a reporting and product-usage signal rather than a real-time operational event.",
+      "sensitive_handling": "The event records only the request metadata, not the exported file contents or customer data.",
+      "properties": {
+        "type": "object",
+        "properties": {
+          "report_type": { "type": "string", "enum": ["inventory_summary", "order_history", "discrepancy_audit"] },
+          "export_format": { "type": "string", "enum": ["csv", "pdf"] },
+          "warehouse": { "type": "string", "enum": ["los_angeles", "zaragoza"] }
+        },
+        "required": ["report_type", "export_format"],
+        "additionalProperties": false
+      }
+    }
+  }
+}

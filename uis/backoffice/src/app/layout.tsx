@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Bitter, Source_Sans_3 } from "next/font/google";
 import { SITE_CONTACT } from "@repo/shared-types";
 import { BackofficeShell } from "@/components/layout/BackofficeShell";
+import { TelemetryInstrumentation } from "@/components/telemetry/TelemetryInstrumentation";
 import "./globals.css";
 
 const sourceSans = Source_Sans_3({
@@ -40,6 +41,7 @@ export default function RootLayout({
       className={`${sourceSans.variable} ${bitter.variable} h-full antialiased`}
     >
       <body className="min-h-full font-sans text-foreground">
+        <TelemetryInstrumentation />
         <BackofficeShell>{children}</BackofficeShell>
       </body>
     </html>

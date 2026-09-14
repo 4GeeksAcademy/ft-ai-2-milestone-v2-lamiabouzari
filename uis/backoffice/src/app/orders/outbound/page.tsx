@@ -11,6 +11,7 @@ import {
   type ExitType,
   type Product,
 } from "@/lib/inventory";
+import { telemetryService } from "@/services/telemetry";
 
 export default function OutboundOrdersPage() {
   return (
@@ -70,6 +71,13 @@ function OutboundOrdersPageContent() {
         exit_type: exitType,
         tracking_number: requiresTrackingNumber ? trackingNumber : null,
         warehouse: selectedProduct.warehouse,
+      });
+      telemetryService.track("outbound_order_created", {
+        sku: selectedProduct.sku,
+        product_id: selectedProduct.id,
+        quantity,
+        warehouse: selectedProduct.warehouse,
+        order_type: exitType,
       });
       setFormSuccess(`Outbound order for "${selectedProduct.sku}" recorded successfully.`);
       setQuantity(1);
