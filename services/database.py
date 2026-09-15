@@ -194,8 +194,9 @@ def get_inventory_engine():
 
 
 def create_inventory_db_and_tables() -> None:
-    """Create the relational inventory tables when they do not exist."""
+    """Create the relational inventory and telemetry tables when absent."""
     from models.inventory import SKU, StockEntry, StockExit  # noqa: F401
+    from models.telemetry import TelemetryEventRecord  # noqa: F401
 
     SQLModel.metadata.create_all(get_inventory_engine())
 
