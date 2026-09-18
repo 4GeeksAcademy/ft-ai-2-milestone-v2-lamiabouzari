@@ -26,6 +26,7 @@ from exceptions import (
     request_validation_exception_handler,
 )
 from routers import auth, inventory, profiles, telemetry, users
+from reporting import router as reporting_router
 
 
 @asynccontextmanager
@@ -78,6 +79,7 @@ app.include_router(users.router)
 app.include_router(profiles.router)
 app.include_router(inventory.router)
 app.include_router(telemetry.router)
+app.include_router(reporting_router.router)
 
 @app.get("/health")
 def health_check() -> dict:
