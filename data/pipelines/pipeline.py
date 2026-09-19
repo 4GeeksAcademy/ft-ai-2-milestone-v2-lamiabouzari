@@ -220,6 +220,27 @@ def load_weekly_performance(
         )
     return len(kpis)
 
+@flow(name="extract_weekly_events_flow")
+def extract_weekly_events_flow(week_start: date) -> list[dict[str, Any]]:
+    """Extract weekly telemetry events for the reporting period."""
+    return extract_weekly_events(week_start)
+
+
+@flow(name="transform_warehouse_client_kpis_flow")
+def transform_warehouse_client_kpis_flow(
+    events: list[dict[str, Any]], week_start: date
+) -> list[dict[str, Any]]:
+    """Transform weekly events into warehouse/client KPI rows."""
+    return transform_warehouse_client_kpis(events, week_start)
+
+
+@flow(name="load_weekly_performance_flow")
+def load_weekly_performance_flow(
+    kpis: list[dict[str, Any]], run_id: str, triggered_by: str
+) -> int:
+    """Load weekly KPI rows and complete the pipeline run."""
+    return load_weekly_performance(kpis, run_id, triggered_by)
+
 
 @task
 
@@ -283,9 +304,9 @@ def weekly_warehouse_client_performance_pipeline(
     run_id = run_id or str(uuid.uuid4())
     _create_run(run_id, resolved_week, triggered_by)
     try:
-        events = extract_weekly_events(resolved_week)
-        kpis = transform_warehouse_client_kpis(events, resolved_week)
-        processed = load_weekly_performance(kpis, run_id, triggered_by)
+        events = extract_weekly_events_flow(resolved_week)
+        kpis = transform_warehouse_client_kpis_flow(events, resolved_week)
+        processed = load_weekly_performance_flow(kpis, run_id, triggered_by)
         if export_audit:
             audit_state = export_audit_snapshot(kpis, run_id, return_state=True)
             if audit_state.is_failed():

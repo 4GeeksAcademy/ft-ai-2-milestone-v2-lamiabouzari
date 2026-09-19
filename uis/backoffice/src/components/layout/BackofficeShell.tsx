@@ -13,6 +13,7 @@ const NAV_LINKS = [
   { href: "/orders/inbound", label: "Inbound Orders" },
   { href: "/orders/outbound", label: "Outbound Orders" },
   { href: "/orders", label: "Order History" },
+  { href: "/reporting", label: "Reporting" },
 ];
 
 export function BackofficeShell({ children }: BackofficeShellProps) {
