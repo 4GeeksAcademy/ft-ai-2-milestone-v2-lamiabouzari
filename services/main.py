@@ -25,7 +25,7 @@ from exceptions import (
     generic_exception_handler,
     request_validation_exception_handler,
 )
-from routers import auth, inventory, profiles, telemetry, users
+from routers import auth, incidents, inventory, profiles, telemetry, users
 from reporting import router as reporting_router
 
 
@@ -80,6 +80,7 @@ app.include_router(profiles.router)
 app.include_router(inventory.router)
 app.include_router(telemetry.router)
 app.include_router(reporting_router.router)
+app.include_router(incidents.router)
 
 @app.get("/health")
 def health_check() -> dict:
