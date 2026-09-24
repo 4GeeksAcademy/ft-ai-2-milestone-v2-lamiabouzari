@@ -230,6 +230,9 @@ def login(body: UserLogin) -> dict:
     doc = matching[0]
     user = User.model_validate(doc)
 
+    if not user.is_active:
+        raise invalid_credentials()
+
     if not pwd_context.verify(body.password, user.hashed_password):
         raise invalid_credentials()
 
