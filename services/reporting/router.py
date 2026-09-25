@@ -7,9 +7,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-import uuid
-
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import text
 
 from database import get_inventory_engine
@@ -19,7 +17,7 @@ _PIPELINES_DIR = _REPO_ROOT / "data" / "pipelines"
 if str(_PIPELINES_DIR) not in sys.path:
     sys.path.insert(0, str(_PIPELINES_DIR))
 
-from pipeline import weekly_warehouse_client_performance_pipeline
+from tasks.pipeline_tasks import run_weekly_warehouse_client_performance
 
 router = APIRouter(prefix="/reporting", tags=["reporting"])
 
@@ -82,15 +80,10 @@ def latest_pipeline_run() -> dict[str, Any]:
 
 @router.post("/pipeline-runs", status_code=status.HTTP_202_ACCEPTED)
 def trigger_pipeline(
-    background_tasks: BackgroundTasks,
     week_start: date | None = Query(default=None),
 ) -> dict[str, Any]:
-    """Trigger the weekly performance Prefect flow through the application API."""
-    run_id = str(uuid.uuid4())
-    background_tasks.add_task(
-        weekly_warehouse_client_performance_pipeline,
-        week_start=week_start,
-        triggered_by="api",
-        run_id=run_id,
+    """Queue the weekly performance pipeline on the independent worker."""
+    task = run_weekly_warehouse_client_performance.apply_async(
+        args=[week_start.isoformat() if week_start else None]
     )
-    return {"run_id": run_id, "status": "Running"}
+    return {"task_id": task.id}
