@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     database_path: str = "data/db.json"
     database_url: str | None = None  # PostgreSQL/Supabase for inventory and telemetry
+    redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str  # required — no default
     jwt_algorithm: str = "HS256"
     jwt_expiry_minutes: int = 30

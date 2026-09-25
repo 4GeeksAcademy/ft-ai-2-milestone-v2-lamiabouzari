@@ -96,3 +96,40 @@ This template was built as part of the 4Geeks Academy AI Engineering Career Prog
 You can find other templates and resources like this at the [4Geeks Academy GitHub page](https://github.com/4geeksacademy).
 
 _This template is maintained by 4Geeks Academy for the AI Engineering track. For exclusive use in the programme._
+
+## Message queues and asynchronous reporting tasks
+
+The reporting pipeline is queued with Celery. Redis is the broker and result
+backend, the API and worker run as separate processes, and Flower provides a
+web dashboard at http://localhost:5555.
+
+Set `REDIS_URL=redis://redis:6379/0` in the Compose environment (use
+`redis://localhost:6379/0` when running directly on the host). Apply
+`migrations/002_create_dlq_tasks.sql` to PostgreSQL before running the worker.
+
+Start the services with:
+
+```bash
+docker compose up --build backend worker redis flower
+```
+
+Queue a report and poll its status:
+
+```bash
+curl -X POST 'http://localhost:8000/reporting/pipeline-runs'
+curl 'http://localhost:8000/tasks/<task_id>'
+```
+
+The POST returns HTTP 202 and `{"task_id": "..."}` immediately. Stopping or
+restarting FastAPI does not stop the independent Celery worker. Redis is
+configured with the `noeviction` policy so queued messages are not silently
+evicted.
+
+Validation commands:
+
+```bash
+services/.venv/bin/pytest -q
+python -m compileall services
+docker compose config
+git diff --check
+```
