@@ -1,0 +1,24 @@
+{
+  "model": "RandomForestRegressor",
+  "random_state": 42,
+  "train_rows": 84,
+  "test_rows": 24,
+  "train_range": [
+    "2016-01-01",
+    "2023-12-01"
+  ],
+  "test_range": [
+    "2024-01-01",
+    "2025-12-01"
+  ],
+  "metrics": {
+    "mse_eur2": 15852169812.698355,
+    "rmse_eur": 125905.40025232577,
+    "rmse_pct_of_average_revenue": 9.691941490839259,
+    "mse_pct_of_squared_mean_revenue": 0.9393372986185153,
+    "psi_test_vs_train": 9.245440661540448,
+    "gini": 0.832069834128588,
+    "k2_statistic": 8.251059497171878,
+    "k2_p_value": 0.01615493426737307
+  }
+}
