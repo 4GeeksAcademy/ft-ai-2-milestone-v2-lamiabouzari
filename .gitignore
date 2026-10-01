@@ -10,3 +10,7 @@ uis/backoffice/.next/
 
 __pycache__/
 *.py[cod]
+
+# Local runtime data
+backups/
+data/db.json
