@@ -12,6 +12,9 @@ from pathlib import Path
 _backend_dir = str(Path(__file__).resolve().parent)
 if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
+_repository_dir = str(Path(_backend_dir).parent)
+if _repository_dir not in sys.path:
+    sys.path.insert(0, _repository_dir)
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -25,7 +28,7 @@ from exceptions import (
     generic_exception_handler,
     request_validation_exception_handler,
 )
-from routers import auth, incidents, inventory, profiles, tasks, telemetry, users
+from routers import auth, incidents, inventory, knowledge, profiles, tasks, telemetry, users
 from reporting import router as reporting_router
 
 
@@ -82,6 +85,7 @@ app.include_router(telemetry.router)
 app.include_router(reporting_router.router)
 app.include_router(incidents.router)
 app.include_router(tasks.router)
+app.include_router(knowledge.router)
 
 @app.get("/health")
 def health_check() -> dict:

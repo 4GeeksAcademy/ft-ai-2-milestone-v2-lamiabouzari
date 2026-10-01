@@ -1,0 +1,34 @@
+[
+  {
+    "question": "Can you guarantee delivery by a specific date during Black Friday or the Sales peak?",
+    "relevant_documents": ["trackflow-sla-delivery.en.md"]
+  },
+  {
+    "question": "What happens to delivery commitments during declared high-demand dates?",
+    "relevant_documents": ["trackflow-sla-delivery.en.md"]
+  },
+  {
+    "question": "Are international returns automatically approved and routed?",
+    "relevant_documents": ["trackflow-returns-policy.en.md"]
+  },
+  {
+    "question": "What is documented about domestic return windows, fees, or eligibility?",
+    "relevant_documents": ["trackflow-returns-policy.en.md"]
+  },
+  {
+    "question": "Which carrier covers a particular destination or postcode?",
+    "relevant_documents": ["trackflow-carrier-coverage.en.md"]
+  },
+  {
+    "question": "How should an undocumented carrier route or service exception be handled?",
+    "relevant_documents": ["trackflow-carrier-coverage.en.md"]
+  },
+  {
+    "question": "What is our storage price per unit and are there minimums?",
+    "relevant_documents": ["trackflow-storage-pricing.en.md"]
+  },
+  {
+    "question": "Can I offer a storage discount, and whose approval is required?",
+    "relevant_documents": ["trackflow-storage-pricing.en.md"]
+  }
+]

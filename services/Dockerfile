@@ -2,12 +2,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-COPY requirements.txt .
+COPY services/requirements.txt ./requirements.txt
 RUN uv pip install --system -r requirements.txt
 
-COPY . .
+COPY services/ .
+COPY data/ /app/data/
+COPY docs/company-knowledge-base/ /app/docs/company-knowledge-base/
 
 EXPOSE 8000
 
