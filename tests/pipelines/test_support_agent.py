@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from data.pipelines import rag, support_agent
+from data.pipelines import incident_tool, rag, support_agent
 from routers import agent
 
 
@@ -95,3 +95,92 @@ def test_api_returns_sanitized_error_on_graph_exception(monkeypatch):
         assert "provider secret details" not in str(exc.detail)
     else:
         raise AssertionError("Expected a sanitized HTTP exception")
+
+
+def test_incident_status_question_routes_to_ticket_tool_not_rag(monkeypatch):
+    def unexpected_retrieval(_question):
+        raise AssertionError("incident questions must not call RAG retrieval")
+
+    monkeypatch.setattr(rag, "retrieve", unexpected_retrieval)
+
+    incident_id = str(uuid4())
+    fake_result = incident_tool.IncidentLookupResult(
+        found=True,
+        incident_id=incident_id,
+        status="in_progress",
+        category="damage",
+        origin="customer",
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-02T00:00:00+00:00",
+    )
+    monkeypatch.setattr(incident_tool, "lookup_incident", lambda _request: fake_result)
+
+    result = support_agent.run_support_agent(f"What is the status of incident {incident_id}?")
+
+    assert result["error"] is None
+    assert incident_id in result["answer"]
+    assert "in_progress" in result["answer"]
+    assert [entry["node"] for entry in result["trace"]] == [
+        "validate_question",
+        "lookup_ticket",
+        "synthesize_ticket_answer",
+    ]
+    assert result["trace"][1]["output"]["outcome"] == "success"
+
+
+def test_policy_question_routes_to_rag_not_ticket_tool(monkeypatch):
+    def unexpected_lookup(_request):
+        raise AssertionError("policy questions must not call the incident tool")
+
+    monkeypatch.setattr(incident_tool, "lookup_incident", unexpected_lookup)
+
+    evidence = [{"source_document": "trackflow-sla-delivery.en.md", "text": "No standard SLA is documented."}]
+    monkeypatch.setattr(rag, "retrieve", lambda _question: evidence)
+    monkeypatch.setattr(rag, "generate_answer", lambda _question, context: "No standard delivery SLA is documented." if context else "")
+
+    result = support_agent.run_support_agent("What is TrackFlow's policy for delivery guarantees?")
+
+    assert result["answer"] == "No standard delivery SLA is documented."
+    assert [entry["node"] for entry in result["trace"]] == [
+        "validate_question",
+        "retrieve_context",
+        "generate_answer",
+    ]
+
+
+def test_incident_question_without_resolvable_id_returns_honest_fallback(monkeypatch):
+    def unexpected_retrieval(_question):
+        raise AssertionError("fallback incident path must not call RAG retrieval")
+
+    monkeypatch.setattr(rag, "retrieve", unexpected_retrieval)
+
+    result = support_agent.run_support_agent("What is the status of my incident?")
+
+    assert result["answer"] != rag.SAFE_REFUSAL
+    assert "incident manager" in result["answer"].lower() or "incident id" in result["answer"].lower()
+    assert [entry["node"] for entry in result["trace"]] == [
+        "validate_question",
+        "lookup_ticket",
+        "incident_fallback",
+    ]
+    assert result["trace"][1]["output"]["outcome"] == "not_found"
+    assert result["trace"][2]["output"]["outcome"] == "not_found"
+
+
+def test_incident_lookup_timeout_is_surfaced_as_honest_fallback(monkeypatch):
+    incident_id = str(uuid4())
+
+    def timed_out(_request):
+        return incident_tool.IncidentLookupResult(found=False, incident_id=incident_id, error="timeout")
+
+    monkeypatch.setattr(incident_tool, "lookup_incident", timed_out)
+
+    result = support_agent.run_support_agent(f"What is the status of ticket {incident_id}?")
+
+    assert "try again" in result["answer"].lower()
+    assert [entry["node"] for entry in result["trace"]] == [
+        "validate_question",
+        "lookup_ticket",
+        "incident_fallback",
+    ]
+    assert result["trace"][2]["output"]["outcome"] == "timeout"

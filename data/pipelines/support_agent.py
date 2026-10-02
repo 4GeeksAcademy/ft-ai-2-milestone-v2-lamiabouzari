@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, TypedDict
 from uuid import uuid4
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from data.pipelines import rag
+from data.pipelines import incident_tool, rag
+
+_INCIDENT_KEYWORDS = re.compile(r"\b(incident|ticket|case)\b", re.IGNORECASE)
 
 
 class SupportAgentState(TypedDict):
@@ -19,10 +22,18 @@ class SupportAgentState(TypedDict):
     answer: str
     error: str | None
     trace: list[dict[str, Any]]
+    intent: str | None
+    incident_id: str | None
+    incident_result: dict[str, Any] | None
 
 
 _INVALID_QUESTION = "Please provide a non-empty question."
 _SAFE_ERROR = "The support agent could not complete this request. Please try again later."
+_INCIDENT_FALLBACKS = {
+    "not_found": "I could not find a matching incident in the incident manager. Please double-check the incident ID.",
+    "timeout": "The incident manager did not respond in time. Please try again shortly.",
+    "error": "I was unable to reach the incident manager right now. Please try again later.",
+}
 
 
 def _trace_entry(
@@ -34,12 +45,33 @@ def _trace_entry(
     return [*state.get("trace", []), {"node": node, "order": len(state.get("trace", [])) + 1, "output": output}]
 
 
+def _classify_intent(question: str) -> str:
+    """Decide whether a question needs the live incident tool or RAG policy lookup."""
+    if incident_tool.extract_incident_id(question) or _INCIDENT_KEYWORDS.search(question):
+        return "incident"
+    return "policy"
+
+
 def validate_question(state: SupportAgentState) -> dict[str, Any]:
-    """Normalize the incoming question and stop blank inputs before retrieval."""
+    """Normalize the incoming question, classify intent, and stop blank inputs."""
     question = state.get("question", "").strip()
     error = None if question else _INVALID_QUESTION
-    output = {"valid": error is None, "question": question, "error": error}
-    return {"question": question, "error": error, "trace": _trace_entry(state, "validate_question", output)}
+    intent = _classify_intent(question) if question else None
+    incident_id = incident_tool.extract_incident_id(question) if question else None
+    output = {
+        "valid": error is None,
+        "question": question,
+        "error": error,
+        "intent": intent,
+        "incident_id": incident_id,
+    }
+    return {
+        "question": question,
+        "error": error,
+        "intent": intent,
+        "incident_id": incident_id,
+        "trace": _trace_entry(state, "validate_question", output),
+    }
 
 
 def retrieve_context(state: SupportAgentState) -> dict[str, Any]:
@@ -92,8 +124,54 @@ def handle_error(state: SupportAgentState) -> dict[str, Any]:
     return {"answer": answer, "trace": _trace_entry(state, "handle_error", output)}
 
 
-def _after_validation(state: SupportAgentState) -> str:
-    return "handle_error" if state.get("error") else "retrieve_context"
+def lookup_ticket(state: SupportAgentState) -> dict[str, Any]:
+    """Call the read-only incident tool against the real incident manager."""
+    incident_id = state.get("incident_id")
+    if not incident_id:
+        result = incident_tool.IncidentLookupResult(found=False, error="not_found")
+    else:
+        request = incident_tool.IncidentLookupInput(incident_id=incident_id)
+        result = incident_tool.lookup_incident(request)
+
+    outcome = "success" if result.found else (result.error or "error")
+    output = {"outcome": outcome, "incident": result.model_dump()}
+    return {
+        "incident_result": result.model_dump(),
+        "error": None,
+        "trace": _trace_entry(state, "lookup_ticket", output),
+    }
+
+
+def synthesize_ticket_answer(state: SupportAgentState) -> dict[str, Any]:
+    """Compose a grounded answer strictly from real incident manager fields."""
+    incident = state["incident_result"]
+    answer = (
+        f"Incident {incident['incident_id']} is currently '{incident['status']}' "
+        f"(category: {incident['category']}, origin: {incident['origin']}). "
+        f"Created {incident['created_at']}, last updated {incident['updated_at']}."
+    )
+    output = {"answer": answer}
+    return {
+        "answer": answer,
+        "error": None,
+        "trace": _trace_entry(state, "synthesize_ticket_answer", output),
+    }
+
+
+def incident_fallback(state: SupportAgentState) -> dict[str, Any]:
+    """Return an honest fallback — never invent ticket status, category, or dates."""
+    incident = state.get("incident_result") or {}
+    outcome = incident.get("error") or "error"
+    answer = _INCIDENT_FALLBACKS.get(outcome, _INCIDENT_FALLBACKS["error"])
+    output = {"answer": answer, "outcome": outcome}
+    return {"answer": answer, "trace": _trace_entry(state, "incident_fallback", output)}
+
+
+def route_intent(state: SupportAgentState) -> str:
+    """Router decision: incident tool, RAG retrieval, or error handling."""
+    if state.get("error"):
+        return "handle_error"
+    return "lookup_ticket" if state.get("intent") == "incident" else "retrieve_context"
 
 
 def _after_retrieval(state: SupportAgentState) -> str:
@@ -106,6 +184,11 @@ def _after_generation(state: SupportAgentState) -> str:
     return "handle_error" if state.get("error") else END
 
 
+def _after_lookup(state: SupportAgentState) -> str:
+    incident = state.get("incident_result") or {}
+    return "synthesize_ticket_answer" if incident.get("found") else "incident_fallback"
+
+
 def _build_graph():
     builder = StateGraph(SupportAgentState)
     builder.add_node("validate_question", validate_question)
@@ -113,12 +196,19 @@ def _build_graph():
     builder.add_node("generate_answer", generate_answer)
     builder.add_node("safe_fallback", safe_fallback)
     builder.add_node("handle_error", handle_error)
+    builder.add_node("lookup_ticket", lookup_ticket)
+    builder.add_node("synthesize_ticket_answer", synthesize_ticket_answer)
+    builder.add_node("incident_fallback", incident_fallback)
 
     builder.add_edge(START, "validate_question")
     builder.add_conditional_edges(
         "validate_question",
-        _after_validation,
-        {"retrieve_context": "retrieve_context", "handle_error": "handle_error"},
+        route_intent,
+        {
+            "retrieve_context": "retrieve_context",
+            "lookup_ticket": "lookup_ticket",
+            "handle_error": "handle_error",
+        },
     )
     builder.add_conditional_edges(
         "retrieve_context",
@@ -134,6 +224,16 @@ def _build_graph():
         _after_generation,
         {"handle_error": "handle_error", END: END},
     )
+    builder.add_conditional_edges(
+        "lookup_ticket",
+        _after_lookup,
+        {
+            "synthesize_ticket_answer": "synthesize_ticket_answer",
+            "incident_fallback": "incident_fallback",
+        },
+    )
+    builder.add_edge("synthesize_ticket_answer", END)
+    builder.add_edge("incident_fallback", END)
     builder.add_edge("safe_fallback", END)
     builder.add_edge("handle_error", END)
     return builder.compile(checkpointer=MemorySaver())
@@ -154,6 +254,9 @@ def run_support_agent(question: str, *, thread_id: str | None = None) -> dict[st
             "answer": "",
             "error": None,
             "trace": [],
+            "intent": None,
+            "incident_id": None,
+            "incident_result": None,
         },
         config=config,
     )
