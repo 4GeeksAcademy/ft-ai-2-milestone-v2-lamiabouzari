@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import inspect
 from uuid import uuid4
 
-from data.pipelines import incident_tool, rag, support_agent
+from data.pipelines import mcp_tools, rag, support_agent
 from routers import agent
 
 
@@ -97,26 +98,54 @@ def test_api_returns_sanitized_error_on_graph_exception(monkeypatch):
         raise AssertionError("Expected a sanitized HTTP exception")
 
 
-def test_incident_status_question_routes_to_ticket_tool_not_rag(monkeypatch):
+def _mcp_success(incident_id: str, **overrides) -> dict:
+    result = {
+        "found": True,
+        "incident_id": incident_id,
+        "status": "in_progress",
+        "category": "damage",
+        "origin": "customer",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-02T00:00:00+00:00",
+        "error": None,
+    }
+    result.update(overrides)
+    return result
+
+
+def _mcp_failure(incident_id: str | None, outcome: str) -> dict:
+    return {
+        "found": False,
+        "incident_id": incident_id,
+        "status": None,
+        "category": None,
+        "origin": None,
+        "created_at": None,
+        "updated_at": None,
+        "error": outcome,
+    }
+
+
+def test_incident_status_question_routes_to_mcp_not_rag(monkeypatch):
+    """A. Incident status question routes to MCP and NOT RAG."""
+
     def unexpected_retrieval(_question):
         raise AssertionError("incident questions must not call RAG retrieval")
 
     monkeypatch.setattr(rag, "retrieve", unexpected_retrieval)
 
     incident_id = str(uuid4())
-    fake_result = incident_tool.IncidentLookupResult(
-        found=True,
-        incident_id=incident_id,
-        status="in_progress",
-        category="damage",
-        origin="customer",
-        created_at="2026-01-01T00:00:00+00:00",
-        updated_at="2026-01-02T00:00:00+00:00",
-    )
-    monkeypatch.setattr(incident_tool, "lookup_incident", lambda _request: fake_result)
+    seen = {}
+
+    def fake_lookup(requested_id):
+        seen["incident_id"] = requested_id
+        return _mcp_success(incident_id)
+
+    monkeypatch.setattr(mcp_tools, "lookup_incident_via_mcp", fake_lookup)
 
     result = support_agent.run_support_agent(f"What is the status of incident {incident_id}?")
 
+    assert seen["incident_id"] == incident_id
     assert result["error"] is None
     assert incident_id in result["answer"]
     assert "in_progress" in result["answer"]
@@ -128,11 +157,13 @@ def test_incident_status_question_routes_to_ticket_tool_not_rag(monkeypatch):
     assert result["trace"][1]["output"]["outcome"] == "success"
 
 
-def test_policy_question_routes_to_rag_not_ticket_tool(monkeypatch):
-    def unexpected_lookup(_request):
-        raise AssertionError("policy questions must not call the incident tool")
+def test_policy_question_routes_to_rag_not_mcp(monkeypatch):
+    """B. Policy question routes to RAG and does NOT invoke MCP."""
 
-    monkeypatch.setattr(incident_tool, "lookup_incident", unexpected_lookup)
+    def unexpected_lookup(_incident_id):
+        raise AssertionError("policy questions must not call the MCP incident tool")
+
+    monkeypatch.setattr(mcp_tools, "lookup_incident_via_mcp", unexpected_lookup)
 
     evidence = [{"source_document": "trackflow-sla-delivery.en.md", "text": "No standard SLA is documented."}]
     monkeypatch.setattr(rag, "retrieve", lambda _question: evidence)
@@ -148,11 +179,35 @@ def test_policy_question_routes_to_rag_not_ticket_tool(monkeypatch):
     ]
 
 
+def test_successful_mcp_result_produces_grounded_incident_answer(monkeypatch):
+    """C. Successful MCP result produces a grounded incident answer."""
+    incident_id = str(uuid4())
+    monkeypatch.setattr(
+        mcp_tools,
+        "lookup_incident_via_mcp",
+        lambda _incident_id: _mcp_success(incident_id, status="resolved", category="lost_package"),
+    )
+
+    result = support_agent.run_support_agent(f"What is the status of incident {incident_id}?")
+
+    assert result["answer"] != rag.SAFE_REFUSAL
+    assert incident_id in result["answer"]
+    assert "resolved" in result["answer"]
+    assert "lost_package" in result["answer"]
+    assert result["trace"][1]["output"]["outcome"] == "success"
+
+
 def test_incident_question_without_resolvable_id_returns_honest_fallback(monkeypatch):
+    """D. Incident ID missing gives honest fallback without any MCP backend call."""
+
     def unexpected_retrieval(_question):
         raise AssertionError("fallback incident path must not call RAG retrieval")
 
+    def unexpected_lookup(_incident_id):
+        raise AssertionError("missing incident_id must not call the MCP backend")
+
     monkeypatch.setattr(rag, "retrieve", unexpected_retrieval)
+    monkeypatch.setattr(mcp_tools, "lookup_incident_via_mcp", unexpected_lookup)
 
     result = support_agent.run_support_agent("What is the status of my incident?")
 
@@ -167,13 +222,12 @@ def test_incident_question_without_resolvable_id_returns_honest_fallback(monkeyp
     assert result["trace"][2]["output"]["outcome"] == "not_found"
 
 
-def test_incident_lookup_timeout_is_surfaced_as_honest_fallback(monkeypatch):
+def test_mcp_timeout_gives_honest_try_again_fallback(monkeypatch):
+    """E. MCP timeout gives an honest 'try again' fallback."""
     incident_id = str(uuid4())
-
-    def timed_out(_request):
-        return incident_tool.IncidentLookupResult(found=False, incident_id=incident_id, error="timeout")
-
-    monkeypatch.setattr(incident_tool, "lookup_incident", timed_out)
+    monkeypatch.setattr(
+        mcp_tools, "lookup_incident_via_mcp", lambda _incident_id: _mcp_failure(incident_id, "timeout")
+    )
 
     result = support_agent.run_support_agent(f"What is the status of ticket {incident_id}?")
 
@@ -184,3 +238,88 @@ def test_incident_lookup_timeout_is_surfaced_as_honest_fallback(monkeypatch):
         "incident_fallback",
     ]
     assert result["trace"][2]["output"]["outcome"] == "timeout"
+
+
+def test_mcp_authentication_failure_gives_safe_fallback(monkeypatch):
+    """F. MCP authentication failure gives a safe fallback."""
+    incident_id = str(uuid4())
+    monkeypatch.setattr(
+        mcp_tools, "lookup_incident_via_mcp", lambda _incident_id: _mcp_failure(incident_id, "authentication")
+    )
+
+    result = support_agent.run_support_agent(f"What is the status of ticket {incident_id}?")
+
+    assert result["answer"] != rag.SAFE_REFUSAL
+    assert result["trace"][2]["output"]["outcome"] == "authentication"
+    # Never invent a status/category for an unauthenticated lookup.
+    assert "in_progress" not in result["answer"]
+    assert "resolved" not in result["answer"]
+
+
+def test_mcp_authorization_failure_gives_safe_fallback(monkeypatch):
+    """G. MCP insufficient-scope (authorization) failure gives a safe fallback."""
+    incident_id = str(uuid4())
+    monkeypatch.setattr(
+        mcp_tools, "lookup_incident_via_mcp", lambda _incident_id: _mcp_failure(incident_id, "authorization")
+    )
+
+    result = support_agent.run_support_agent(f"What is the status of ticket {incident_id}?")
+
+    assert result["answer"] != rag.SAFE_REFUSAL
+    assert result["trace"][2]["output"]["outcome"] == "authorization"
+    assert "permission" in result["answer"].lower()
+
+
+def test_mcp_not_found_result_gives_honest_fallback(monkeypatch):
+    """H. MCP not-found result gives an honest fallback."""
+    incident_id = str(uuid4())
+    monkeypatch.setattr(
+        mcp_tools, "lookup_incident_via_mcp", lambda _incident_id: _mcp_failure(incident_id, "not_found")
+    )
+
+    result = support_agent.run_support_agent(f"What is the status of incident {incident_id}?")
+
+    assert "double-check" in result["answer"].lower() or "could not find" in result["answer"].lower()
+    assert result["trace"][2]["output"]["outcome"] == "not_found"
+
+
+def test_malformed_mcp_result_does_not_hallucinate_data(monkeypatch):
+    """I. Malformed MCP result does not hallucinate data."""
+    incident_id = str(uuid4())
+    # Simulates mcp_tools' own normalization of an unparseable payload: a
+    # controlled "error" outcome with no invented fields.
+    monkeypatch.setattr(
+        mcp_tools, "lookup_incident_via_mcp", lambda _incident_id: _mcp_failure(incident_id, "error")
+    )
+
+    result = support_agent.run_support_agent(f"What is the status of incident {incident_id}?")
+
+    assert result["trace"][2]["output"]["outcome"] == "error"
+    for invented in ("in_progress", "resolved", "damage", "lost_package", "customer"):
+        assert invented not in result["answer"]
+
+
+def test_checkpoint_and_thread_behavior_remains_working(monkeypatch):
+    """J. Checkpoint/thread behavior remains working for the MCP incident path."""
+    incident_id = str(uuid4())
+    monkeypatch.setattr(mcp_tools, "lookup_incident_via_mcp", lambda _incident_id: _mcp_success(incident_id))
+    thread_id = f"support-incident-test-{uuid4()}"
+
+    result = support_agent.run_support_agent(
+        f"What is the status of incident {incident_id}?", thread_id=thread_id
+    )
+    checkpoint = support_agent.get_support_agent_checkpoint(thread_id)
+
+    assert result["thread_id"] == thread_id
+    assert checkpoint is not None
+    assert checkpoint["answer"] == result["answer"]
+    assert checkpoint["incident_result"]["incident_id"] == incident_id
+
+
+def test_support_agent_has_no_direct_incident_tool_call():
+    """K. Explicitly confirm support_agent.py contains no call to incident_tool.lookup_incident."""
+    source = inspect.getsource(support_agent)
+    assert "incident_tool.lookup_incident" not in source
+    assert "incident_tool" not in source
+    assert "TinyDB" not in source
+    assert "get_db" not in source

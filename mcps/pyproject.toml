@@ -1,0 +1,24 @@
+[project]
+name = "mcps"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "fastmcp>=4.0.11",
+    "httpx>=0.28.1",
+    "mcp[cli]>=1.28.0",
+    "mcpauth>=0.1.1",
+]
+# Note: langchain-mcp-adapters is a client-side dependency (used by the
+# LangGraph agent in services/, not by this MCP server) and requires mcp<2,
+# which conflicts with fastmcp>=4's mcp 2.x requirement. It belongs in
+# services/requirements.txt, not here.
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
