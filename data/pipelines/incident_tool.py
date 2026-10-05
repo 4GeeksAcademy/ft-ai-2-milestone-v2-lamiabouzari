@@ -1,9 +1,10 @@
-"""Read-only incident lookup tool backed by the real TrackFlow incident manager.
+"""Deprecated: direct (non-MCP) incident lookup, kept only as legacy code.
 
-This intentionally does not create a parallel ticket dataset: it reads the
-same TinyDB store used by ``services/routers/incidents.py`` (``GET
-/api/incidents/{incident_id}``). The agent graph never creates, updates, or
-deletes incidents through this module.
+No longer imported by the support agent — ``data/pipelines/support_agent.py``
+now reaches incidents exclusively through ``data/pipelines/mcp_tools.py`` and
+the MCP server in ``mcps/``. This module reads the same TinyDB store used by
+``services/routers/incidents.py`` directly and is unused outside its own
+tests; retained for reference rather than deleted.
 """
 
 from __future__ import annotations

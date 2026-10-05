@@ -9,7 +9,7 @@ from uuid import uuid4
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from data.pipelines import incident_tool, rag
+from data.pipelines import mcp_tools, rag, support_utils
 
 _INCIDENT_KEYWORDS = re.compile(r"\b(incident|ticket|case)\b", re.IGNORECASE)
 
@@ -32,6 +32,9 @@ _SAFE_ERROR = "The support agent could not complete this request. Please try aga
 _INCIDENT_FALLBACKS = {
     "not_found": "I could not find a matching incident in the incident manager. Please double-check the incident ID.",
     "timeout": "The incident manager did not respond in time. Please try again shortly.",
+    "unavailable": "I was unable to reach the incident manager right now. Please try again later.",
+    "authentication": "I could not verify access to the incident manager right now. Please try again later.",
+    "authorization": "I do not have permission to look up that incident right now. Please try again later.",
     "error": "I was unable to reach the incident manager right now. Please try again later.",
 }
 
@@ -47,7 +50,7 @@ def _trace_entry(
 
 def _classify_intent(question: str) -> str:
     """Decide whether a question needs the live incident tool or RAG policy lookup."""
-    if incident_tool.extract_incident_id(question) or _INCIDENT_KEYWORDS.search(question):
+    if support_utils.extract_incident_id(question) or _INCIDENT_KEYWORDS.search(question):
         return "incident"
     return "policy"
 
@@ -57,7 +60,7 @@ def validate_question(state: SupportAgentState) -> dict[str, Any]:
     question = state.get("question", "").strip()
     error = None if question else _INVALID_QUESTION
     intent = _classify_intent(question) if question else None
-    incident_id = incident_tool.extract_incident_id(question) if question else None
+    incident_id = support_utils.extract_incident_id(question) if question else None
     output = {
         "valid": error is None,
         "question": question,
@@ -125,18 +128,26 @@ def handle_error(state: SupportAgentState) -> dict[str, Any]:
 
 
 def lookup_ticket(state: SupportAgentState) -> dict[str, Any]:
-    """Call the read-only incident tool against the real incident manager."""
+    """Call the MCP `get_incident` tool — the only path to incident data."""
     incident_id = state.get("incident_id")
     if not incident_id:
-        result = incident_tool.IncidentLookupResult(found=False, error="not_found")
+        result = {
+            "found": False,
+            "incident_id": None,
+            "status": None,
+            "category": None,
+            "origin": None,
+            "created_at": None,
+            "updated_at": None,
+            "error": "not_found",
+        }
     else:
-        request = incident_tool.IncidentLookupInput(incident_id=incident_id)
-        result = incident_tool.lookup_incident(request)
+        result = mcp_tools.lookup_incident_via_mcp(incident_id)
 
-    outcome = "success" if result.found else (result.error or "error")
-    output = {"outcome": outcome, "incident": result.model_dump()}
+    outcome = "success" if result["found"] else (result.get("error") or "error")
+    output = {"outcome": outcome, "incident": result}
     return {
-        "incident_result": result.model_dump(),
+        "incident_result": result,
         "error": None,
         "trace": _trace_entry(state, "lookup_ticket", output),
     }
