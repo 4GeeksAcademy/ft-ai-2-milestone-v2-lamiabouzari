@@ -1,17 +1,64 @@
-"""LangGraph support-agent flow built on the shared TrackFlow RAG functions."""
+"""LangGraph support-agent flow built on the shared TrackFlow RAG functions.
+
+Input checks, external-content isolation, output checks, and country-policy
+enforcement run in this graph. Retrieved documents and MCP payloads stay data.
+"""
 
 from __future__ import annotations
 
 import re
+from contextvars import ContextVar
 from typing import Any, TypedDict
 from uuid import uuid4
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from data.pipelines import mcp_tools, rag, support_utils
+from data.pipelines import guardrails, mcp_tools, rag, support_utils
 
 _INCIDENT_KEYWORDS = re.compile(r"\b(incident|ticket|case)\b", re.IGNORECASE)
+_JAILBREAK_PATTERNS = (
+    re.compile(
+        r"\b(ignore|disregard|forget|override|bypass|delete|drop)\b"
+        r".{0,60}\b(your|the|all|previous|prior|above|earlier|system|developer)\b"
+        r".{0,35}\b(instructions?|rules?|prompts?|guidelines?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(act as|pretend to be|behave as)\b.{0,50}\b(no rules|unrestricted|"
+        r"without restrictions|without limits|rule[- ]free)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(reveal|print|show|repeat)\b.{0,35}\b(system|developer)\s+prompt\b", re.IGNORECASE),
+)
+_OUT_OF_SCOPE_TASKS = re.compile(
+    r"\b(essay|homework|school assignment|class assignment|coding|programming|"
+    r"write (me )?a (story|poem|song|resume)|relationship advice|medical advice|"
+    r"legal advice|financial advice|personal advice)\b",
+    re.IGNORECASE,
+)
+_TRACKFLOW_TOPICS = re.compile(
+    r"\b(trackflow|shipment|shipping|tracking|order|track (my |the )?(package|parcel|order)|"
+    r"package|parcel|delivery|deliveries|return|returns|refund|sla|service level|"
+    r"incident|ticket|case|lost (package|parcel|shipment)|failed delivery|wrong address|"
+    r"address change|courier|logistics|dispatch)\b",
+    re.IGNORECASE,
+)
+_GUARDRAIL_REDIRECT = (
+    "I can help with TrackFlow logistics support, including shipment tracking, returns, "
+    "SLA policies, and delivery incidents. Please ask a question about one of those topics."
+)
+_UNAUTHORIZED_ORDER = (
+    "You are not authorized to view that order. I can only discuss orders that belong "
+    "to your authenticated session, and I can't share any details for this request."
+)
+_GUARDRAIL_EVENTS = {
+    "jailbreak": ("input_jailbreak", "block", "security"),
+    "out_of_scope": ("input_scope", "redirect", "content"),
+    "unauthorized_order": ("order_authorization", "block", "security"),
+}
+
+_SESSION: ContextVar[guardrails.SupportSession | None] = ContextVar("trackflow_support_session", default=None)
 
 
 class SupportAgentState(TypedDict):
@@ -25,6 +72,9 @@ class SupportAgentState(TypedDict):
     intent: str | None
     incident_id: str | None
     incident_result: dict[str, Any] | None
+    guardrail_reason: str | None
+    country_enforcement: dict[str, str] | None
+    guardrail_events: list[dict[str, Any]]
 
 
 _INVALID_QUESTION = "Please provide a non-empty question."
@@ -48,6 +98,42 @@ def _trace_entry(
     return [*state.get("trace", []), {"node": node, "order": len(state.get("trace", [])) + 1, "output": output}]
 
 
+def _owned_order_ids() -> frozenset[str]:
+    session = _SESSION.get()
+    if session is None:
+        return frozenset()
+    return frozenset(str(order_id) for order_id in session.owned_order_ids)
+
+
+def _order_is_authorized(order_id: str) -> bool:
+    """Fail closed. Denial does not surface order fields from the decision."""
+    session = _SESSION.get()
+    try:
+        decision = mcp_tools.authorize_order_access(
+            order_id,
+            subject=None if session is None else session.subject,
+            owned_order_ids=_owned_order_ids(),
+        )
+    except Exception:
+        return False
+    return bool(decision.get("authorized")) and decision.get("error") is None
+
+
+def _append_guardrail_event(
+    state: SupportAgentState,
+    event: dict[str, str] | None,
+) -> list[dict[str, Any]]:
+    events = list(state.get("guardrail_events") or [])
+    if event is not None:
+        events.append(event)
+    return events
+
+
+def _guarded_answer(state: SupportAgentState, answer: str) -> tuple[str, dict[str, str] | None, list[dict[str, Any]]]:
+    safe_answer, event = guardrails.apply_output_guardrail(answer, owned_order_ids=_owned_order_ids())
+    return safe_answer, event, _append_guardrail_event(state, event)
+
+
 def _classify_intent(question: str) -> str:
     """Decide whether a question needs the live incident tool or RAG policy lookup."""
     if support_utils.extract_incident_id(question) or _INCIDENT_KEYWORDS.search(question):
@@ -55,11 +141,37 @@ def _classify_intent(question: str) -> str:
     return "policy"
 
 
+def _jailbreak_attempt(question: str) -> bool:
+    """Recognize common instruction-override attempts without an LLM call."""
+    return any(pattern.search(question) for pattern in _JAILBREAK_PATTERNS)
+
+
+def _scope_guardrail(question: str) -> bool:
+    """Allow TrackFlow logistics topics and reject personal or unrelated requests."""
+    if _OUT_OF_SCOPE_TASKS.search(question):
+        return True
+    return not _TRACKFLOW_TOPICS.search(question)
+
+
 def validate_question(state: SupportAgentState) -> dict[str, Any]:
-    """Normalize the incoming question, classify intent, and stop blank inputs."""
+    """Normalize input and deterministically check security and support scope."""
     question = state.get("question", "").strip()
     error = None if question else _INVALID_QUESTION
-    intent = _classify_intent(question) if question else None
+    guardrail_reason = None
+    if question and _jailbreak_attempt(question):
+        guardrail_reason = "jailbreak"
+    elif question and _scope_guardrail(question):
+        guardrail_reason = "out_of_scope"
+    elif question and (order_id := guardrails.extract_order_id(question)) and not _order_is_authorized(order_id):
+        guardrail_reason = "unauthorized_order"
+    country_enforcement = None
+    if question and error is None and guardrail_reason is None:
+        country_enforcement = guardrails.detect_country_policy_conflict(question)
+    intent = (
+        _classify_intent(question)
+        if question and not guardrail_reason and country_enforcement is None
+        else None
+    )
     incident_id = support_utils.extract_incident_id(question) if question else None
     output = {
         "valid": error is None,
@@ -67,13 +179,66 @@ def validate_question(state: SupportAgentState) -> dict[str, Any]:
         "error": error,
         "intent": intent,
         "incident_id": incident_id,
+        "guardrail_reason": guardrail_reason,
+        "country_enforcement": country_enforcement,
     }
     return {
         "question": question,
         "error": error,
         "intent": intent,
         "incident_id": incident_id,
+        "guardrail_reason": guardrail_reason,
+        "country_enforcement": country_enforcement,
         "trace": _trace_entry(state, "validate_question", output),
+    }
+
+
+def guardrail_refusal(state: SupportAgentState) -> dict[str, Any]:
+    """Stop unsafe or out-of-scope input and redirect to TrackFlow support."""
+    reason = state.get("guardrail_reason") or "out_of_scope"
+    guardrail_name, action, failure_type = _GUARDRAIL_EVENTS.get(reason, ("input_scope", "redirect", "content"))
+    event = guardrails.record_guardrail(guardrail_name, action, failure_type)
+    answer = _UNAUTHORIZED_ORDER if reason == "unauthorized_order" else _GUARDRAIL_REDIRECT
+    output = {
+        "answer": answer,
+        "reason": reason,
+        "guardrail": event["guardrail"],
+        "action": event["action"],
+        "failure_type": event["failure_type"],
+    }
+    return {
+        "answer": answer,
+        "guardrail_events": _append_guardrail_event(state, event),
+        "trace": _trace_entry(state, "guardrail_refusal", output),
+    }
+
+
+def enforce_country_policy(state: SupportAgentState) -> dict[str, Any]:
+    """Reject a cross-country policy switch and answer with the order's country only."""
+    decision = state.get("country_enforcement") or {}
+    answer = guardrails.country_policy_answer(
+        actual_country=decision["actual_country"],
+        requested_country=decision["requested_country"],
+        place=decision["place"],
+    )
+    answer, output_event, events = _guarded_answer(state, answer)
+    if output_event is None:
+        event = guardrails.record_guardrail("country_policy", "redirect", "content")
+        events = _append_guardrail_event(state, event)
+    else:
+        event = output_event
+    output = {
+        "answer": answer,
+        "guardrail": event["guardrail"],
+        "action": event["action"],
+        "failure_type": event["failure_type"],
+        "actual_country": decision.get("actual_country"),
+        "requested_country": decision.get("requested_country"),
+    }
+    return {
+        "answer": answer,
+        "guardrail_events": events,
+        "trace": _trace_entry(state, "enforce_country_policy", output),
     }
 
 
@@ -90,10 +255,17 @@ def retrieve_context(state: SupportAgentState) -> dict[str, Any]:
             "trace": _trace_entry(state, "retrieve_context", output),
         }
 
-    output = {"retrieved_context": context, "result_count": len(context)}
+    context, injected = guardrails.isolate_documents(context)
+    output: dict[str, Any] = {"retrieved_context": context, "result_count": len(context)}
+    events = list(state.get("guardrail_events") or [])
+    if injected:
+        event = guardrails.record_guardrail("external_content", "quarantine", "structural")
+        output.update(event)
+        events = _append_guardrail_event(state, event)
     return {
         "retrieved_context": context,
         "error": None,
+        "guardrail_events": events,
         "trace": _trace_entry(state, "retrieve_context", output),
     }
 
@@ -107,8 +279,16 @@ def generate_answer(state: SupportAgentState) -> dict[str, Any]:
         output = {"error": error}
         return {"answer": rag.SAFE_REFUSAL, "error": error, "trace": _trace_entry(state, "generate_answer", output)}
 
+    answer, event, events = _guarded_answer(state, answer)
     output = {"answer": answer}
-    return {"answer": answer, "error": None, "trace": _trace_entry(state, "generate_answer", output)}
+    if event is not None:
+        output.update(event)
+    return {
+        "answer": answer,
+        "error": None,
+        "guardrail_events": events,
+        "trace": _trace_entry(state, "generate_answer", output),
+    }
 
 
 def safe_fallback(state: SupportAgentState) -> dict[str, Any]:
@@ -144,11 +324,18 @@ def lookup_ticket(state: SupportAgentState) -> dict[str, Any]:
     else:
         result = mcp_tools.lookup_incident_via_mcp(incident_id)
 
+    result, injected = guardrails.isolate_tool_result(result)
     outcome = "success" if result["found"] else (result.get("error") or "error")
-    output = {"outcome": outcome, "incident": result}
+    output: dict[str, Any] = {"outcome": outcome, "incident": result}
+    events = list(state.get("guardrail_events") or [])
+    if injected:
+        event = guardrails.record_guardrail("external_content", "quarantine", "structural")
+        output.update(event)
+        events = _append_guardrail_event(state, event)
     return {
         "incident_result": result,
         "error": None,
+        "guardrail_events": events,
         "trace": _trace_entry(state, "lookup_ticket", output),
     }
 
@@ -161,10 +348,14 @@ def synthesize_ticket_answer(state: SupportAgentState) -> dict[str, Any]:
         f"(category: {incident['category']}, origin: {incident['origin']}). "
         f"Created {incident['created_at']}, last updated {incident['updated_at']}."
     )
+    answer, event, events = _guarded_answer(state, answer)
     output = {"answer": answer}
+    if event is not None:
+        output.update(event)
     return {
         "answer": answer,
         "error": None,
+        "guardrail_events": events,
         "trace": _trace_entry(state, "synthesize_ticket_answer", output),
     }
 
@@ -179,9 +370,13 @@ def incident_fallback(state: SupportAgentState) -> dict[str, Any]:
 
 
 def route_intent(state: SupportAgentState) -> str:
-    """Router decision: incident tool, RAG retrieval, or error handling."""
+    """Router decision: guardrail, incident tool, RAG retrieval, or error handling."""
+    if state.get("guardrail_reason"):
+        return "guardrail_refusal"
     if state.get("error"):
         return "handle_error"
+    if state.get("country_enforcement"):
+        return "enforce_country_policy"
     return "lookup_ticket" if state.get("intent") == "incident" else "retrieve_context"
 
 
@@ -203,6 +398,8 @@ def _after_lookup(state: SupportAgentState) -> str:
 def _build_graph():
     builder = StateGraph(SupportAgentState)
     builder.add_node("validate_question", validate_question)
+    builder.add_node("guardrail_refusal", guardrail_refusal)
+    builder.add_node("enforce_country_policy", enforce_country_policy)
     builder.add_node("retrieve_context", retrieve_context)
     builder.add_node("generate_answer", generate_answer)
     builder.add_node("safe_fallback", safe_fallback)
@@ -219,8 +416,12 @@ def _build_graph():
             "retrieve_context": "retrieve_context",
             "lookup_ticket": "lookup_ticket",
             "handle_error": "handle_error",
+            "guardrail_refusal": "guardrail_refusal",
+            "enforce_country_policy": "enforce_country_policy",
         },
     )
+    builder.add_edge("guardrail_refusal", END)
+    builder.add_edge("enforce_country_policy", END)
     builder.add_conditional_edges(
         "retrieve_context",
         _after_retrieval,
@@ -254,23 +455,35 @@ def _build_graph():
 support_agent_graph = _build_graph()
 
 
-def run_support_agent(question: str, *, thread_id: str | None = None) -> dict[str, Any]:
+def run_support_agent(
+    question: str,
+    *,
+    thread_id: str | None = None,
+    session: guardrails.SupportSession | None = None,
+) -> dict[str, Any]:
     """Invoke the compiled graph and return state, trace, and checkpoint ID."""
     run_id = thread_id or str(uuid4())
     config = {"configurable": {"thread_id": run_id}}
-    result = support_agent_graph.invoke(
-        {
-            "question": question,
-            "retrieved_context": [],
-            "answer": "",
-            "error": None,
-            "trace": [],
-            "intent": None,
-            "incident_id": None,
-            "incident_result": None,
-        },
-        config=config,
-    )
+    token = _SESSION.set(session)
+    try:
+        result = support_agent_graph.invoke(
+            {
+                "question": question,
+                "retrieved_context": [],
+                "answer": "",
+                "error": None,
+                "trace": [],
+                "intent": None,
+                "incident_id": None,
+                "incident_result": None,
+                "guardrail_reason": None,
+                "country_enforcement": None,
+                "guardrail_events": [],
+            },
+            config=config,
+        )
+    finally:
+        _SESSION.reset(token)
     return {**result, "thread_id": run_id}
 
 

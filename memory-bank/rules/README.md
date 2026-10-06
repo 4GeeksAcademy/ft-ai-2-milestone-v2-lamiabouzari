@@ -13,3 +13,4 @@ Guardrails for migration quality and repo safety. Read before non-trivial work.
 | 7. Memory bank hygiene | [memory-bank-hygiene.md](./memory-bank-hygiene.md) |
 | 8. Brand alignment | [brand-alignment.md](./brand-alignment.md) |
 | 9. Verification | [verification.md](./verification.md) |
+| 10. Agent guardrails | [agent-guardrails.md](./agent-guardrails.md) |
