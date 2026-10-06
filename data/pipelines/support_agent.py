@@ -14,7 +14,7 @@ from uuid import uuid4
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from data.pipelines import guardrails, mcp_tools, rag, support_utils
+from data.pipelines import agent_memory, guardrails, mcp_tools, rag, support_utils
 
 _INCIDENT_KEYWORDS = re.compile(r"\b(incident|ticket|case)\b", re.IGNORECASE)
 _JAILBREAK_PATTERNS = (
@@ -41,7 +41,7 @@ _TRACKFLOW_TOPICS = re.compile(
     r"\b(trackflow|shipment|shipping|tracking|order|track (my |the )?(package|parcel|order)|"
     r"package|parcel|delivery|deliveries|return|returns|refund|sla|service level|"
     r"incident|ticket|case|lost (package|parcel|shipment)|failed delivery|wrong address|"
-    r"address change|courier|logistics|dispatch)\b",
+    r"address change|courier|carriers|carrier|logistics|dispatch)\b",
     re.IGNORECASE,
 )
 _GUARDRAIL_REDIRECT = (
@@ -134,6 +134,14 @@ def _guarded_answer(state: SupportAgentState, answer: str) -> tuple[str, dict[st
     return safe_answer, event, _append_guardrail_event(state, event)
 
 
+def _with_operational_memory(question: str, answer: str) -> str:
+    """Append saved operational facts that match this question. Memory stays data."""
+    note = agent_memory.operational_context(question)
+    if not note or note in answer:
+        return answer
+    return f"{answer.rstrip()}\n\nOperational memory: {note}"
+
+
 def _classify_intent(question: str) -> str:
     """Decide whether a question needs the live incident tool or RAG policy lookup."""
     if support_utils.extract_incident_id(question) or _INCIDENT_KEYWORDS.search(question):
@@ -160,7 +168,7 @@ def validate_question(state: SupportAgentState) -> dict[str, Any]:
     guardrail_reason = None
     if question and _jailbreak_attempt(question):
         guardrail_reason = "jailbreak"
-    elif question and _scope_guardrail(question):
+    elif question and _scope_guardrail(question) and not agent_memory.allows_operational_update(question):
         guardrail_reason = "out_of_scope"
     elif question and (order_id := guardrails.extract_order_id(question)) and not _order_is_authorized(order_id):
         guardrail_reason = "unauthorized_order"
@@ -279,6 +287,7 @@ def generate_answer(state: SupportAgentState) -> dict[str, Any]:
         output = {"error": error}
         return {"answer": rag.SAFE_REFUSAL, "error": error, "trace": _trace_entry(state, "generate_answer", output)}
 
+    answer = _with_operational_memory(state.get("question", ""), answer)
     answer, event, events = _guarded_answer(state, answer)
     output = {"answer": answer}
     if event is not None:
@@ -294,7 +303,7 @@ def generate_answer(state: SupportAgentState) -> dict[str, Any]:
 def safe_fallback(state: SupportAgentState) -> dict[str, Any]:
     """Return the RAG safe refusal when evidence is absent or a step failed."""
     error = state.get("error")
-    answer = rag.SAFE_REFUSAL
+    answer = _with_operational_memory(state.get("question", ""), rag.SAFE_REFUSAL)
     output = {"answer": answer, "error": error}
     return {"answer": answer, "trace": _trace_entry(state, "safe_fallback", output)}
 
@@ -464,11 +473,22 @@ def run_support_agent(
     """Invoke the compiled graph and return state, trace, and checkpoint ID."""
     run_id = thread_id or str(uuid4())
     config = {"configurable": {"thread_id": run_id}}
+    resolution = None
+    question_for_graph = question
+    try:
+        prepared = agent_memory.prepare_confirmation(question, run_id)
+    except Exception:
+        prepared = None
+    if prepared is not None:
+        resolution = prepared.get("memory_resolution")
+        if prepared.get("skip_graph"):
+            return {**prepared["result"], "thread_id": run_id}
+        question_for_graph = str(prepared.get("question") or question)
     token = _SESSION.set(session)
     try:
         result = support_agent_graph.invoke(
             {
-                "question": question,
+                "question": question_for_graph,
                 "retrieved_context": [],
                 "answer": "",
                 "error": None,
@@ -484,6 +504,15 @@ def run_support_agent(
         )
     finally:
         _SESSION.reset(token)
+    try:
+        if resolution is None:
+            result = agent_memory.attach_proposal(result, question_for_graph, run_id)
+        else:
+            result = {**result, "memory_proposal": None}
+    except Exception:
+        result = {**result, "memory_proposal": None}
+    if resolution is not None:
+        result["memory_resolution"] = resolution
     return {**result, "thread_id": run_id}
 
 
