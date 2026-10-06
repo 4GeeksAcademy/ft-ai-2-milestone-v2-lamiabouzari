@@ -14,3 +14,4 @@ Guardrails for migration quality and repo safety. Read before non-trivial work.
 | 8. Brand alignment | [brand-alignment.md](./brand-alignment.md) |
 | 9. Verification | [verification.md](./verification.md) |
 | 10. Agent guardrails | [agent-guardrails.md](./agent-guardrails.md) |
+| 11. Agent memory | [agent-memory.md](./agent-memory.md) |

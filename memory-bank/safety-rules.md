@@ -16,3 +16,4 @@ Each rule lives in its own file under [`rules/`](./rules/README.md):
 | 8 | Brand alignment | [rules/brand-alignment.md](./rules/brand-alignment.md) |
 | 9 | Verification | [rules/verification.md](./rules/verification.md) |
 | 10 | Agent guardrails | [rules/agent-guardrails.md](./rules/agent-guardrails.md) |
+| 11 | Agent memory | [rules/agent-memory.md](./rules/agent-memory.md) |
