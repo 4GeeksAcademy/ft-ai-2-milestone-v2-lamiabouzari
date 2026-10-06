@@ -15,3 +15,5 @@ __pycache__/
 backups/
 data/db.json
 data/agent_memory/
+data/raw/rfp/*
+!data/raw/rfp/.gitkeep

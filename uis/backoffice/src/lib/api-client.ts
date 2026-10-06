@@ -71,3 +71,36 @@ export async function apiRequest<T>(
 
   return (await response.json()) as T;
 }
+
+export async function apiUpload<T>(path: string, file: File, fieldName = "file"): Promise<T> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const body = new FormData();
+  body.append(fieldName, file);
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: "POST",
+    headers,
+    body,
+  });
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload = {};
+    try {
+      payload = (await response.json()) as ApiErrorPayload;
+    } catch {
+      // Response body was not JSON.
+    }
+    const detail = payload.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : `Request failed with status ${response.status}`;
+    throw new ApiError(message, response.status, payload.error_code);
+  }
+
+  return (await response.json()) as T;
+}

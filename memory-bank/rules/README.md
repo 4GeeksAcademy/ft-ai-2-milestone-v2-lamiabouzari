@@ -15,3 +15,4 @@ Guardrails for migration quality and repo safety. Read before non-trivial work.
 | 9. Verification | [verification.md](./verification.md) |
 | 10. Agent guardrails | [agent-guardrails.md](./agent-guardrails.md) |
 | 11. Agent memory | [agent-memory.md](./agent-memory.md) |
+| 12. RFP intake | [rfp-intake.md](./rfp-intake.md) |
