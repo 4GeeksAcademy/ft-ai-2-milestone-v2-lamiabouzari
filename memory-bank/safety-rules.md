@@ -15,3 +15,4 @@ Each rule lives in its own file under [`rules/`](./rules/README.md):
 | 7 | Memory bank hygiene | [rules/memory-bank-hygiene.md](./rules/memory-bank-hygiene.md) |
 | 8 | Brand alignment | [rules/brand-alignment.md](./rules/brand-alignment.md) |
 | 9 | Verification | [rules/verification.md](./rules/verification.md) |
+| 10 | Agent guardrails | [rules/agent-guardrails.md](./rules/agent-guardrails.md) |

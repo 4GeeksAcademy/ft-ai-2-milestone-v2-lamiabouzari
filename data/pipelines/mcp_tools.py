@@ -194,3 +194,26 @@ def lookup_incident_via_mcp(
             return _failure_result(incident_id, "timeout")
         except Exception as exc:  # noqa: BLE001 - translated into a controlled outcome below
             return _failure_result(incident_id, _outcome_from_exception(exc))
+
+
+def authorize_order_access(
+    order_id: str,
+    *,
+    subject: str | None,
+    owned_order_ids: frozenset[str] | set[str] | tuple[str, ...] | list[str] = (),
+) -> dict[str, Any]:
+    """Decide whether an authenticated subject may read one order.
+
+    Uses the same outcome names as MCP tool failures in this module
+    (``authentication`` and ``authorization``). A subject who does not own
+    the order is denied with ``authorization``, never ``not_found``, and the
+    decision carries no order payload. ``order_id`` is compared to the
+    session allow-list and is not echoed on denial.
+    """
+    requested = str(order_id)
+    if subject is None or not str(subject).strip():
+        return {"authorized": False, "error": "authentication"}
+    owned = {str(item) for item in owned_order_ids}
+    if requested not in owned:
+        return {"authorized": False, "error": "authorization"}
+    return {"authorized": True, "error": None}
