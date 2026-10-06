@@ -12,6 +12,37 @@ from langgraph.graph import END, START, StateGraph
 from data.pipelines import mcp_tools, rag, support_utils
 
 _INCIDENT_KEYWORDS = re.compile(r"\b(incident|ticket|case)\b", re.IGNORECASE)
+_JAILBREAK_PATTERNS = (
+    re.compile(
+        r"\b(ignore|disregard|forget|override|bypass|delete|drop)\b"
+        r".{0,60}\b(your|the|all|previous|prior|above|earlier|system|developer)\b"
+        r".{0,35}\b(instructions?|rules?|prompts?|guidelines?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(act as|pretend to be|behave as)\b.{0,50}\b(no rules|unrestricted|"
+        r"without restrictions|without limits|rule[- ]free)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(reveal|print|show|repeat)\b.{0,35}\b(system|developer)\s+prompt\b", re.IGNORECASE),
+)
+_OUT_OF_SCOPE_TASKS = re.compile(
+    r"\b(essay|homework|school assignment|class assignment|coding|programming|"
+    r"write (me )?a (story|poem|song|resume)|relationship advice|medical advice|"
+    r"legal advice|financial advice|personal advice)\b",
+    re.IGNORECASE,
+)
+_TRACKFLOW_TOPICS = re.compile(
+    r"\b(trackflow|shipment|shipping|tracking|order|track (my |the )?(package|parcel|order)|"
+    r"package|parcel|delivery|deliveries|return|returns|refund|sla|service level|"
+    r"incident|ticket|case|lost (package|parcel|shipment)|failed delivery|wrong address|"
+    r"address change|courier|logistics|dispatch)\b",
+    re.IGNORECASE,
+)
+_GUARDRAIL_REDIRECT = (
+    "I can help with TrackFlow logistics support, including shipment tracking, returns, "
+    "SLA policies, and delivery incidents. Please ask a question about one of those topics."
+)
 
 
 class SupportAgentState(TypedDict):
@@ -25,6 +56,7 @@ class SupportAgentState(TypedDict):
     intent: str | None
     incident_id: str | None
     incident_result: dict[str, Any] | None
+    guardrail_reason: str | None
 
 
 _INVALID_QUESTION = "Please provide a non-empty question."
@@ -55,11 +87,28 @@ def _classify_intent(question: str) -> str:
     return "policy"
 
 
+def _jailbreak_attempt(question: str) -> bool:
+    """Recognize common instruction-override attempts without an LLM call."""
+    return any(pattern.search(question) for pattern in _JAILBREAK_PATTERNS)
+
+
+def _scope_guardrail(question: str) -> bool:
+    """Allow TrackFlow logistics topics and reject personal or unrelated requests."""
+    if _OUT_OF_SCOPE_TASKS.search(question):
+        return True
+    return not _TRACKFLOW_TOPICS.search(question)
+
+
 def validate_question(state: SupportAgentState) -> dict[str, Any]:
-    """Normalize the incoming question, classify intent, and stop blank inputs."""
+    """Normalize input and deterministically check security and support scope."""
     question = state.get("question", "").strip()
     error = None if question else _INVALID_QUESTION
-    intent = _classify_intent(question) if question else None
+    guardrail_reason = None
+    if question and _jailbreak_attempt(question):
+        guardrail_reason = "jailbreak"
+    elif question and _scope_guardrail(question):
+        guardrail_reason = "out_of_scope"
+    intent = _classify_intent(question) if question and not guardrail_reason else None
     incident_id = support_utils.extract_incident_id(question) if question else None
     output = {
         "valid": error is None,
@@ -67,13 +116,25 @@ def validate_question(state: SupportAgentState) -> dict[str, Any]:
         "error": error,
         "intent": intent,
         "incident_id": incident_id,
+        "guardrail_reason": guardrail_reason,
     }
     return {
         "question": question,
         "error": error,
         "intent": intent,
         "incident_id": incident_id,
+        "guardrail_reason": guardrail_reason,
         "trace": _trace_entry(state, "validate_question", output),
+    }
+
+
+def guardrail_refusal(state: SupportAgentState) -> dict[str, Any]:
+    """Stop unsafe or out-of-scope input and redirect to TrackFlow support."""
+    reason = state.get("guardrail_reason") or "out_of_scope"
+    output = {"answer": _GUARDRAIL_REDIRECT, "reason": reason}
+    return {
+        "answer": _GUARDRAIL_REDIRECT,
+        "trace": _trace_entry(state, "guardrail_refusal", output),
     }
 
 
@@ -179,7 +240,9 @@ def incident_fallback(state: SupportAgentState) -> dict[str, Any]:
 
 
 def route_intent(state: SupportAgentState) -> str:
-    """Router decision: incident tool, RAG retrieval, or error handling."""
+    """Router decision: guardrail, incident tool, RAG retrieval, or error handling."""
+    if state.get("guardrail_reason"):
+        return "guardrail_refusal"
     if state.get("error"):
         return "handle_error"
     return "lookup_ticket" if state.get("intent") == "incident" else "retrieve_context"
@@ -203,6 +266,7 @@ def _after_lookup(state: SupportAgentState) -> str:
 def _build_graph():
     builder = StateGraph(SupportAgentState)
     builder.add_node("validate_question", validate_question)
+    builder.add_node("guardrail_refusal", guardrail_refusal)
     builder.add_node("retrieve_context", retrieve_context)
     builder.add_node("generate_answer", generate_answer)
     builder.add_node("safe_fallback", safe_fallback)
@@ -219,8 +283,10 @@ def _build_graph():
             "retrieve_context": "retrieve_context",
             "lookup_ticket": "lookup_ticket",
             "handle_error": "handle_error",
+            "guardrail_refusal": "guardrail_refusal",
         },
     )
+    builder.add_edge("guardrail_refusal", END)
     builder.add_conditional_edges(
         "retrieve_context",
         _after_retrieval,
@@ -268,6 +334,7 @@ def run_support_agent(question: str, *, thread_id: str | None = None) -> dict[st
             "intent": None,
             "incident_id": None,
             "incident_result": None,
+            "guardrail_reason": None,
         },
         config=config,
     )
