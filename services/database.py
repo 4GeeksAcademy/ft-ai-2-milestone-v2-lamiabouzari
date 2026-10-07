@@ -207,7 +207,11 @@ def create_inventory_db_and_tables() -> None:
     )
     from models.telemetry import TelemetryEventRecord  # noqa: F401
 
-    SQLModel.metadata.create_all(get_inventory_engine())
+    engine = get_inventory_engine()
+    SQLModel.metadata.create_all(engine)
+    from data.pipelines.rfp_intake.store import ensure_rfp_id_column
+
+    ensure_rfp_id_column(engine)
 
 
 def get_inventory_db():

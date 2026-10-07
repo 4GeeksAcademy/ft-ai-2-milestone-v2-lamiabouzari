@@ -24,6 +24,7 @@ from data.pipelines.rfp_intake.store import (
 )
 from data.pipelines.rfp_intake.synthesizer import synthesize
 from data.pipelines.rfp_intake.workers import analyze, relevant_extract
+from events.rfp_notifications import maybe_publish_rfp_created
 
 
 def _metadata_values(metadata, classification) -> dict[str, Any]:
@@ -54,6 +55,9 @@ def run_markdown(ticket_id: str, markdown: str) -> dict[str, Any]:
         replace_sections(ticket_id, [])
         mark_discarded(ticket_id, classification.reason)
         return {"ticket_id": ticket_id, "status": "discarded", "workers_ran": False}
+
+    save_metadata(ticket_id, _metadata_values(metadata, classification))
+    maybe_publish_rfp_created(ticket_id)
 
     orchestrated = plan(metadata, markdown)
     metadata.departments_needed = [item.department_key for item in orchestrated.departments]

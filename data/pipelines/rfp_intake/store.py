@@ -12,10 +12,12 @@ _SERVICES = Path(__file__).resolve().parents[3] / "services"
 if str(_SERVICES) not in sys.path:
     sys.path.insert(0, str(_SERVICES))
 
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, select
 
 from models.rfp import (
+    new_rfp_id,
     RfpApprovalCheckpoint,
     RfpDepartmentSection,
     RfpFinalDocument,
@@ -59,6 +61,35 @@ def create_tables(engine: Engine | None = None) -> None:
             RfpFinalDocument.__table__,
         ],
     )
+    ensure_rfp_id_column(target)
+
+
+def ensure_rfp_id_column(engine: Engine) -> None:
+    """Add rfp_id to an existing rfp_tickets table. Rows and ticket ids stay put.
+
+    SQLModel create_all does not alter a table that already exists.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table("rfp_tickets"):
+        return
+    names = {column["name"] for column in inspector.get_columns("rfp_tickets")}
+    with engine.begin() as connection:
+        if "rfp_id" not in names:
+            connection.execute(text("ALTER TABLE rfp_tickets ADD COLUMN rfp_id VARCHAR"))
+        missing = connection.execute(
+            text("SELECT id FROM rfp_tickets WHERE rfp_id IS NULL OR rfp_id = ''")
+        ).all()
+        for row in missing:
+            connection.execute(
+                text("UPDATE rfp_tickets SET rfp_id = :rfp_id WHERE id = :id"),
+                {"rfp_id": new_rfp_id(), "id": row[0]},
+            )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_rfp_tickets_rfp_id "
+                "ON rfp_tickets (rfp_id)"
+            )
+        )
 
 
 def _session() -> Session:
@@ -73,6 +104,7 @@ def create_ticket(*, source_filename: str, pdf_path: str, ticket_id: str | None 
     """Insert one ticket in analyzing. Upload returns before the pipeline runs."""
     ticket = RfpTicket(
         id=ticket_id or str(uuid.uuid4()),
+        rfp_id=new_rfp_id(),
         status="analyzing",
         source_filename=source_filename,
         pdf_path=pdf_path,
@@ -224,6 +256,7 @@ def ticket_snapshot(ticket_id: str) -> dict[str, Any] | None:
         ).first()
         return {
             "ticket_id": ticket.id,
+            "rfp_id": ticket.rfp_id,
             "status": ticket.status,
             "source_filename": ticket.source_filename,
             "discard_reason": ticket.discard_reason,

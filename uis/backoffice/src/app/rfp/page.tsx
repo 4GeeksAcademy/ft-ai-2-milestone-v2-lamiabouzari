@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { ApiError, apiRequest, apiUpload } from "@/lib/api-client";
+import { applyRfpCreated, RfpCreatedEvent, startRfpEventStream } from "@/lib/rfp-events";
 
 interface RfpSection {
   department_key: string;
@@ -31,6 +32,7 @@ interface RfpApproval {
 
 interface RfpTicket {
   ticket_id: string;
+  rfp_id?: string | null;
   status: string;
   source_filename: string;
   discard_reason: string | null;
@@ -65,28 +67,91 @@ export default function RfpIntakePage() {
   );
 }
 
+function ticketFromEvent(event: RfpCreatedEvent): RfpTicket {
+  return {
+    ticket_id: event.ticket_id,
+    status: event.status,
+    source_filename: event.client_name,
+    discard_reason: null,
+    error_message: null,
+    intake_failed: false,
+    currency_context: null,
+    handoff_ready: false,
+    metadata: {
+      client_name: event.client_name,
+      client_country: event.client_country,
+      services_requested: event.services_requested,
+      monthly_volume: null,
+      deadline: null,
+      budget_range: null,
+      departments_needed: [],
+      readability: {},
+      document_style: "",
+    },
+    sections: [],
+    synthesizer: null,
+  };
+}
+
 function RfpIntakeContent() {
   const [tickets, setTickets] = useState<RfpTicket[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [notes, setNotes] = useState<Record<string, { comment: string; changes: string }>>({});
+  const [notice, setNotice] = useState<RfpCreatedEvent | null>(null);
+  const [highlighted, setHighlighted] = useState<Set<string>>(new Set());
+  const ticketsRef = useRef<RfpTicket[]>([]);
+
+  function replaceTickets(next: RfpTicket[]) {
+    ticketsRef.current = next;
+    setTickets(next);
+  }
 
   async function refresh() {
     const rows = await apiRequest<RfpTicket[]>("/rfp/tickets", { auth: true });
-    setTickets(rows);
+    replaceTickets(rows);
   }
 
   useEffect(() => {
-    let cancelled = false;
-    refresh().catch((requestError: unknown) => {
-      if (!cancelled) {
-        setError(requestError instanceof ApiError ? requestError.message : "Could not load RFP tickets.");
-      }
+    const stop = startRfpEventStream<RfpTicket>({
+      fetchTickets: () => apiRequest<RfpTicket[]>("/rfp/tickets", { auth: true }),
+      currentTickets: () => ticketsRef.current,
+      onTickets: (next, announced) => {
+        replaceTickets(next);
+        if (announced.length > 0) {
+          const newest = announced[0];
+          setHighlighted((current) => new Set(current).add(newest.ticket_id));
+          if (newest.metadata?.client_name && newest.metadata.client_country) {
+            setNotice({
+              ticket_id: newest.ticket_id,
+              rfp_id: newest.rfp_id ?? null,
+              client_name: newest.metadata.client_name,
+              client_country: newest.metadata.client_country,
+              services_requested: newest.metadata.services_requested,
+              status: newest.status,
+              created_at: "",
+            });
+          }
+        }
+      },
+      onCreated: (event) => {
+        const existing = ticketsRef.current.find((ticket) => ticket.ticket_id === event.ticket_id);
+        const applied = applyRfpCreated(ticketsRef.current, event, ticketFromEvent(event));
+        const next = applied.added
+          ? applied.tickets
+          : applied.tickets.map((ticket) => {
+              if (ticket.ticket_id !== event.ticket_id || ticket.metadata?.client_name) return ticket;
+              const shell = ticketFromEvent(event);
+              return { ...ticket, metadata: shell.metadata };
+            });
+        replaceTickets(next);
+        if (!applied.added && existing?.metadata?.client_name) return;
+        setHighlighted((current) => new Set(current).add(event.ticket_id));
+        setNotice(event);
+      },
     });
-    return () => {
-      cancelled = true;
-    };
+    return stop;
   }, []);
 
   const stillAnalyzing = tickets.some(
@@ -153,8 +218,21 @@ function RfpIntakeContent() {
         ) : null}
       </div>
 
+      {notice ? (
+        <p role="status" className="rounded-xl border border-accent bg-white px-4 py-3 text-sm text-foreground">
+          New RFP from {notice.client_name} ({notice.client_country}). Services: {notice.services_requested.join(", ")}.
+        </p>
+      ) : null}
+
       {tickets.map((ticket) => (
-        <article key={ticket.ticket_id} className="dashboard-card p-6">
+        <article
+          key={ticket.ticket_id}
+          className={
+            highlighted.has(ticket.ticket_id)
+              ? "dashboard-card p-6 ring-2 ring-accent"
+              : "dashboard-card p-6"
+          }
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-display text-lg text-foreground">{ticket.source_filename}</h3>
             <p className="text-xs font-semibold uppercase tracking-wide text-accent-strong">
