@@ -206,6 +206,7 @@ def create_inventory_db_and_tables() -> None:
         RfpTraceRecord,
     )
     from models.telemetry import TelemetryEventRecord  # noqa: F401
+    from models.chat import ChatMessage, ChatSession  # noqa: F401
 
     engine = get_inventory_engine()
     SQLModel.metadata.create_all(engine)

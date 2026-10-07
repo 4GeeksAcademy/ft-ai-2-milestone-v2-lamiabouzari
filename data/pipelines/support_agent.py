@@ -59,6 +59,22 @@ _GUARDRAIL_EVENTS = {
 }
 
 _SESSION: ContextVar[guardrails.SupportSession | None] = ContextVar("trackflow_support_session", default=None)
+_TOKEN_SINK: ContextVar[Any] = ContextVar("first_line_cx_token_sink", default=None)
+_CANCEL: ContextVar[Any] = ContextVar("first_line_cx_cancel", default=None)
+
+
+def bind_token_stream(sink: Any, cancel: Any) -> tuple[Any, Any]:
+    """Attach a chat transport on the worker that is running the graph.
+
+    POST /agent/query leaves both context vars unset, so that path still uses
+    the non-streaming RAG call.
+    """
+    return _TOKEN_SINK.set(sink), _CANCEL.set(cancel)
+
+
+def unbind_token_stream(tokens: tuple[Any, Any]) -> None:
+    _TOKEN_SINK.reset(tokens[0])
+    _CANCEL.reset(tokens[1])
 
 
 class SupportAgentState(TypedDict):
@@ -278,10 +294,28 @@ def retrieve_context(state: SupportAgentState) -> dict[str, Any]:
     }
 
 
+def _streamed_rag_answer(question: str, context: list[dict[str, Any]], sink: Any, cancel: Any) -> str:
+    """Forward model deltas as they arrive, then apply the existing safeguards."""
+    if not context:
+        return rag.SAFE_REFUSAL
+    parts: list[str] = []
+    for delta in rag.iter_model_deltas(question, context):
+        if cancel is not None and cancel.is_set():
+            break
+        parts.append(delta)
+        sink(delta)
+    raw = "".join(parts).strip() or rag.SAFE_REFUSAL
+    return rag._apply_business_safeguards(question, raw, context)
+
+
 def generate_answer(state: SupportAgentState) -> dict[str, Any]:
     """Generate a grounded response using the existing RAG answer function."""
     try:
-        answer = rag.generate_answer(state["question"], state["retrieved_context"])
+        sink = _TOKEN_SINK.get()
+        if sink is None:
+            answer = rag.generate_answer(state["question"], state["retrieved_context"])
+        else:
+            answer = _streamed_rag_answer(state["question"], state["retrieved_context"], sink, _CANCEL.get())
     except Exception:
         error = "Unable to generate a TrackFlow response. Please try again later."
         output = {"error": error}
