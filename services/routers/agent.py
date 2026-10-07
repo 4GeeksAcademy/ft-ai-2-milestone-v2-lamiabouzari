@@ -2,20 +2,32 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from agent_rate_limit import allow_agent_request
 from data.pipelines.support_agent import run_support_agent
 from dependencies import get_current_user
+from model_input import ModelInputError, normalize_model_question
 from models.user import UserPublic
 
 router = APIRouter(prefix="/agent", tags=["agent"])
+logger = logging.getLogger(__name__)
 
 
 class AgentQueryRequest(BaseModel):
-    question: str = Field(max_length=2000)
+    question: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("question")
+    @classmethod
+    def normalize_question(cls, value: str) -> str:
+        try:
+            return normalize_model_question(value)
+        except ModelInputError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class AgentQueryResponse(BaseModel):
@@ -31,6 +43,9 @@ def agent_query(
     _user: UserPublic = Depends(get_current_user),
 ) -> AgentQueryResponse:
     """Invoke the agent graph and return its answer and execution trace."""
+    if not allow_agent_request(str(_user.id)):
+        logger.warning("agent_rate_limited action=support_turn outcome=rejected")
+        raise HTTPException(status_code=429, detail="Too many agent requests. Try again later.")
     try:
         result = run_support_agent(request.question)
     except Exception as exc:

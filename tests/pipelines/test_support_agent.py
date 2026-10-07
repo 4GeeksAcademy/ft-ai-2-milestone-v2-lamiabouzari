@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 from uuid import uuid4
 
 from data.pipelines import mcp_tools, rag, support_agent
@@ -89,7 +90,10 @@ def test_api_returns_sanitized_error_on_graph_exception(monkeypatch):
     monkeypatch.setattr(agent, "run_support_agent", fail)
 
     try:
-        agent.agent_query(agent.AgentQueryRequest(question="question"))
+        agent.agent_query(
+            agent.AgentQueryRequest(question="question"),
+            _user=SimpleNamespace(id="unit-test-user"),
+        )
     except Exception as exc:
         assert getattr(exc, "status_code", None) == 500
         assert exc.detail == "The support agent could not complete this request."

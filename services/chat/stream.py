@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from chat import store
 from chat.bus import bus
 from data.pipelines.support_agent import bind_token_stream, run_support_agent, unbind_token_stream
+from model_input import ModelInputError, normalize_model_question
 from models.chat import AGENT_ID
 
 _runtime_lock = threading.Lock()
@@ -177,8 +178,9 @@ async def _produce(generation: Generation, question: str) -> None:
 
 
 async def start_generation(session_id: str, text: str) -> None:
-    question = text.strip()
-    if not question:
+    try:
+        question = normalize_model_question(text)
+    except ModelInputError:
         return
     session = store.get_session(session_id)
     if session is None or session.status == "closed":
