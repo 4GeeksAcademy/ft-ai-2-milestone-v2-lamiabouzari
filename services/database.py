@@ -197,10 +197,13 @@ def create_inventory_db_and_tables() -> None:
     """Create the relational inventory and telemetry tables when absent."""
     from models.inventory import SKU, StockEntry, StockExit  # noqa: F401
     from models.rfp import (  # noqa: F401
+        RfpApprovalCheckpoint,
         RfpDepartmentSection,
+        RfpFinalDocument,
         RfpMetadataRecord,
         RfpSynthesizerRecord,
         RfpTicket,
+        RfpTraceRecord,
     )
     from models.telemetry import TelemetryEventRecord  # noqa: F401
 

@@ -54,7 +54,7 @@ def run_department_loop(ticket_id: str, brief: GenerationInput) -> DepartmentOut
     The same department generator receives ``feedback_for_generator`` on the next pass.
     The last draft is kept when the limit is reached.
     """
-    feedback: str | None = None
+    feedback: str | None = brief.feedback
     last_draft = ""
     last_evaluation: dict | None = None
     try:

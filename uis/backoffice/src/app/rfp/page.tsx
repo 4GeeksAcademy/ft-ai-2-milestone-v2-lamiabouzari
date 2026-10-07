@@ -10,17 +10,38 @@ interface RfpSection {
   contact: string;
   key_aspects: string[];
   open_questions: string[];
+  draft_content?: string;
+  approval_status?: string | null;
+  iteration_count?: number;
+  evaluation_results?: { overall_pass?: boolean; iterations?: number } | null;
+}
+
+interface RfpApproval {
+  thread_id: string;
+  department_id: string;
+  department_name: string | null;
+  owner: string | null;
+  draft_content: string;
+  evaluation_results: { overall_pass?: boolean; iterations?: number } | null;
+  iteration_count: number;
+  approval_status: string;
+  interrupted: boolean;
+  actions: string[];
 }
 
 interface RfpTicket {
   ticket_id: string;
-  status: "analyzing" | "intake_complete" | "discarded";
+  status: string;
   source_filename: string;
   discard_reason: string | null;
   error_message: string | null;
   intake_failed: boolean;
   currency_context: string | null;
   handoff_ready: boolean;
+  part3_handoff_ready?: boolean;
+  approvals?: RfpApproval[];
+  open_conflicts?: { conflict_id: string; arbiter: string; next: string; resolution_rule: string }[];
+  final_document?: { document_markdown: string } | null;
   metadata: {
     client_name: string | null;
     client_country: string | null;
@@ -49,6 +70,7 @@ function RfpIntakeContent() {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [notes, setNotes] = useState<Record<string, { comment: string; changes: string }>>({});
 
   async function refresh() {
     const rows = await apiRequest<RfpTicket[]>("/rfp/tickets", { auth: true });
@@ -197,6 +219,128 @@ function RfpIntakeContent() {
             <pre className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-800">
               {ticket.synthesizer.sales_summary}
             </pre>
+          ) : null}
+          {ticket.part3_handoff_ready &&
+          (ticket.status === "under_evaluation" || ticket.status === "needs_human_review") ? (
+            <button
+              type="button"
+              className="mt-4 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white"
+              onClick={() =>
+                apiRequest(`/rfp/tickets/${ticket.ticket_id}/approval`, { method: "POST", auth: true })
+                  .then(() => refresh())
+                  .catch((requestError: unknown) =>
+                    setError(requestError instanceof ApiError ? requestError.message : "Could not open approval.")
+                  )
+              }
+            >
+              Start approval
+            </button>
+          ) : null}
+          {(ticket.approvals ?? []).length > 0 ? (
+            <div className="mt-4 space-y-3">
+              {(ticket.open_conflicts ?? []).map((conflict) => (
+                <p key={conflict.conflict_id} className="text-sm text-red-800">
+                  {conflict.conflict_id}: {conflict.arbiter}. {conflict.resolution_rule} Next: {conflict.next}
+                </p>
+              ))}
+              {(ticket.open_conflicts ?? []).length > 0 ? (
+                <button
+                  type="button"
+                  className="rounded-full border border-slate-300 px-4 py-2 text-sm"
+                  onClick={() =>
+                    apiRequest(`/rfp/tickets/${ticket.ticket_id}/arbitration`, { method: "POST", auth: true })
+                      .then(() => refresh())
+                      .catch((requestError: unknown) =>
+                        setError(requestError instanceof ApiError ? requestError.message : "Arbitration failed.")
+                      )
+                  }
+                >
+                  Apply arbitration
+                </button>
+              ) : null}
+              {(ticket.approvals ?? []).map((approval) => {
+                const noteKey = `${ticket.ticket_id}:${approval.department_id}`;
+                const note = notes[noteKey] ?? { comment: "", changes: "" };
+                async function decide(decision: "approve" | "reject" | "request_changes") {
+                  try {
+                    await apiRequest(`/rfp/tickets/${ticket.ticket_id}/approval/resume`, {
+                      method: "POST",
+                      auth: true,
+                      body: {
+                        department: approval.department_id,
+                        decision,
+                        actor: approval.owner,
+                        comment: note.comment,
+                        requested_changes: decision === "request_changes" ? note.changes : null,
+                      },
+                    });
+                    await refresh();
+                  } catch (requestError: unknown) {
+                    setError(requestError instanceof ApiError ? requestError.message : "Approval failed.");
+                  }
+                }
+                return (
+                  <section key={approval.thread_id} className="rounded-xl bg-panel-soft p-4 text-sm">
+                    <p className="font-semibold text-foreground">
+                      {approval.department_name} — {approval.owner}
+                    </p>
+                    <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">
+                      {approval.approval_status}
+                      {approval.interrupted ? " · waiting for this owner" : ""} · iteration {approval.iteration_count}
+                      {approval.evaluation_results?.overall_pass === false ? " · evaluation failed" : ""}
+                    </p>
+                    <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap text-slate-800">
+                      {approval.draft_content}
+                    </pre>
+                    {approval.actions.length > 0 ? (
+                      <div className="mt-3 space-y-2">
+                        <label className="block text-xs text-slate-600">
+                          Comment
+                          <input
+                            value={note.comment}
+                            onChange={(event) =>
+                              setNotes((current) => ({ ...current, [noteKey]: { ...note, comment: event.target.value } }))
+                            }
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          />
+                        </label>
+                        <label className="block text-xs text-slate-600">
+                          Requested changes
+                          <textarea
+                            value={note.changes}
+                            onChange={(event) =>
+                              setNotes((current) => ({ ...current, [noteKey]: { ...note, changes: event.target.value } }))
+                            }
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          />
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white" onClick={() => decide("approve")}>
+                            Approve
+                          </button>
+                          <button type="button" className="rounded-full border border-slate-300 px-4 py-2 text-sm" onClick={() => decide("reject")}>
+                            Reject
+                          </button>
+                          <button type="button" className="rounded-full border border-slate-300 px-4 py-2 text-sm" onClick={() => decide("request_changes")}>
+                            Request changes
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })}
+            </div>
+          ) : null}
+          {ticket.final_document ? (
+            <div className="mt-4">
+              <p className="text-sm font-semibold text-foreground">
+                Final document · /rfp/tickets/{ticket.ticket_id}/document
+              </p>
+              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-sm text-slate-800">
+                {ticket.final_document.document_markdown}
+              </pre>
+            </div>
           ) : null}
         </article>
       ))}

@@ -38,3 +38,15 @@ Lifecycle: `intake_complete` → `drafting` → `under_evaluation`. If every act
 Active departments only: `warehouse` (Ana Whitfield), `lastmile` (Carlos Vega), `reverse` (Sofía Ramos). Each has its own generator. Readability, relevance, and compliance evaluators run in parallel and return separate results. Compliance rule ids: `TRACKFLOW_CURRENCY`, `TRACKFLOW_DELIVERY_SLA`, `TRACKFLOW_RETURNS_MIN_48H`, `TRACKFLOW_VOLUME_DISCOUNT_TIERS`, `TRACKFLOW_NO_CARRIER_RATE_DISCLOSURE`.
 
 The Part 3 handoff (`trackflow.rfp.response.v1`) includes, for every active department, the draft, the evaluation, the iteration count, and `approval_status: pending`.
+
+## Part 3 approval
+
+`POST /rfp/tickets/{id}/approval` opens one interrupt per active department when status is `under_evaluation` or `needs_human_review` and `part3_handoff_ready` is true. Drafts are the persisted Part 2 drafts.
+
+`POST /rfp/tickets/{id}/approval/resume` continues one department checkpoint. `POST /rfp/tickets/{id}/arbitration` applies the fixed conflict rules. `GET /rfp/tickets/{id}/document` returns the final proposal.
+
+Ticket lifecycle in Part 3: `waiting_for_approval` → `done`. Department approval status is `pending`, `approved`, `rejected`, or `changes_requested`. The ticket stays `waiting_for_approval` until every active department is approved, conflicts are clear, and the final document row is stored.
+
+Checkpoints are SQLModel rows (`rfp_approval_checkpoints`) in the same database. Thread id is `rfp-{ticket_id}:{department_id}`. This is the approval interrupt: the project does not use LangGraph, and the row is the pause. `start_approval` persists `node=approval_interrupt` and `interrupted=true` before any department is approved. `resume_approval` loads that row and continues only that thread. Approve does not rerun intake or response generation. Reject and request_changes send only that department back through its Part 2 loop.
+
+Owners are Ana Whitfield, Carlos Vega, and Sofía Ramos. Miguel Torres arbitrates volume-vs-capacity and currency-mismatch, and a returns breach that is not in the reverse section. A reverse-section returns breach is sent back to Sofía Ramos. Revision limit is `PART3_MAX_REVISIONS` (3), the same bound as Part 2 `MAX_ITERATIONS`.
