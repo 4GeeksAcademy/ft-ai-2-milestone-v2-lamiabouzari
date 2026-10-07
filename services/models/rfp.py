@@ -9,7 +9,9 @@ from sqlalchemy import Column
 from sqlalchemy import JSON
 from sqlmodel import Field, SQLModel
 
-TicketStatus = str  # analyzing | intake_complete | discarded
+# Part 1: analyzing | intake_complete | discarded
+# Part 2: drafting | under_evaluation | needs_human_review
+TicketStatus = str
 
 
 def _now() -> datetime:
@@ -32,6 +34,8 @@ class RfpTicket(SQLModel, table=True):
     currency_context: str | None = None
     handoff_ready: bool = False
     routing_handoff: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    part3_handoff_ready: bool = False
+    part3_handoff: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
 
@@ -58,7 +62,7 @@ class RfpMetadataRecord(SQLModel, table=True):
 
 
 class RfpDepartmentSection(SQLModel, table=True):
-    """One department worker result, including key aspects."""
+    """One department worker result, plus the Part 2 draft and evaluation."""
 
     __tablename__ = "rfp_department_sections"
 
@@ -70,6 +74,12 @@ class RfpDepartmentSection(SQLModel, table=True):
     key_aspects: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     open_questions: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     extract_text: str = ""
+    draft_content: str = ""
+    evaluation_results: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    iteration_count: int = 0
+    section_status: str | None = None
+    approval_status: str | None = None
+    needs_human_review: bool = False
 
 
 class RfpSynthesizerRecord(SQLModel, table=True):
