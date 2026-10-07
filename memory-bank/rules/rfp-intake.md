@@ -49,4 +49,8 @@ Ticket lifecycle in Part 3: `waiting_for_approval` → `done`. Department approv
 
 Checkpoints are SQLModel rows (`rfp_approval_checkpoints`) in the same database. Thread id is `rfp-{ticket_id}:{department_id}`. This is the approval interrupt: the project does not use LangGraph, and the row is the pause. `start_approval` persists `node=approval_interrupt` and `interrupted=true` before any department is approved. `resume_approval` loads that row and continues only that thread. Approve does not rerun intake or response generation. Reject and request_changes send only that department back through its Part 2 loop.
 
+Each ticket stores `rfp_id` as `rfp_<hex>`, separate from `ticket_id` (`rfp_tickets.id`). `create_all` does not alter an existing table, so startup adds the column when it is missing and backfills only empty values.
+
+`GET /events/stream` is the authenticated SSE stream for a new valid RFP. The event `rfp_ticket_created` is published only after the classifier accepts the document, `client_name`, `client_country`, and `services_requested` are stored, and the ticket is still `analyzing`. Upload alone does not publish. A discarded carrier pitch does not publish. Each dashboard connection has its own queue. The backoffice uses fetch with `Authorization: Bearer`, refetch-then-SSE on reconnect, and `ticket_id` dedupe. The notification path does not call a model.
+
 Owners are Ana Whitfield, Carlos Vega, and Sofía Ramos. Miguel Torres arbitrates volume-vs-capacity and currency-mismatch, and a returns breach that is not in the reverse section. A reverse-section returns breach is sent back to Sofía Ramos. Revision limit is `PART3_MAX_REVISIONS` (3), the same bound as Part 2 `MAX_ITERATIONS`.

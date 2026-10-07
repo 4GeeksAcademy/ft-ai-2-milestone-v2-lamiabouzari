@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -19,12 +20,18 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def new_rfp_id() -> str:
+    """Business id for one RFP. This is not the ticket primary key."""
+    return f"rfp_{uuid.uuid4().hex}"
+
+
 class RfpTicket(SQLModel, table=True):
     """One uploaded PDF and the intake status for that ticket."""
 
     __tablename__ = "rfp_tickets"
 
     id: str = Field(primary_key=True)
+    rfp_id: str = Field(default_factory=new_rfp_id, unique=True, index=True)
     status: str = "analyzing"
     source_filename: str
     pdf_path: str
