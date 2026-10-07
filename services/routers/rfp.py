@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 
 from data.pipelines.rfp_intake.pipeline import process_ticket
 from data.pipelines.rfp_intake.store import create_tables, create_ticket, get_engine, list_tickets, ticket_snapshot
+from data.pipelines.rfp_response.pipeline import Part2NotReady, run_response
 from dependencies import get_current_user
 from models.user import UserPublic
 
@@ -70,3 +71,15 @@ def get_ticket(ticket_id: str, _user: UserPublic = Depends(get_current_user)) ->
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Ticket not found.")
     return snapshot
+
+
+@router.post("/tickets/{ticket_id}/response")
+def generate_response(ticket_id: str, _user: UserPublic = Depends(get_current_user)) -> dict:
+    """Run Part 2 from the stored Part 1 routing handoff."""
+    _ensure_store()
+    try:
+        return run_response(ticket_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Ticket not found.") from None
+    except Part2NotReady as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

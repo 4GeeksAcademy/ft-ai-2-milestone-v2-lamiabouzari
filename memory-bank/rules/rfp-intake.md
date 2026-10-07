@@ -26,3 +26,15 @@ When status is `intake_complete`, `rfp_tickets.handoff_ready` is true and `routi
 - `sections` (department, contact, `key_aspects`, `open_questions`)
 
 Discarded tickets leave `handoff_ready` false. No second API is created for Part 2.
+
+## Part 2 response
+
+`POST /rfp/tickets/{ticket_id}/response` runs only when status is `intake_complete` and `handoff_ready` is true. The generator input is `routing_handoff` (`trackflow.rfp.intake.v1`): ticket id, synthesizer payload, and each active section's key aspects and open questions. The PDF is not parsed again. Client country is read from the Part 1 metadata row when the handoff does not repeat it.
+
+Part 2 statuses are `drafting`, `under_evaluation`, and `needs_human_review`. Part 1 statuses stay as they are. `waiting_for_approval` and `done` are not used.
+
+Lifecycle: `intake_complete` → `drafting` → `under_evaluation`. If every active section passes, status stays `under_evaluation` and `part3_handoff_ready` is true. If any section reaches `MAX_ITERATIONS` (3) without passing, status becomes `needs_human_review`. The last draft and its `EvaluationResult` stay on the section and in `part3_handoff`.
+
+Active departments only: `warehouse` (Ana Whitfield), `lastmile` (Carlos Vega), `reverse` (Sofía Ramos). Each has its own generator. Readability, relevance, and compliance evaluators run in parallel and return separate results. Compliance rule ids: `TRACKFLOW_CURRENCY`, `TRACKFLOW_DELIVERY_SLA`, `TRACKFLOW_RETURNS_MIN_48H`, `TRACKFLOW_VOLUME_DISCOUNT_TIERS`, `TRACKFLOW_NO_CARRIER_RATE_DISCLOSURE`.
+
+The Part 3 handoff (`trackflow.rfp.response.v1`) includes, for every active department, the draft, the evaluation, the iteration count, and `approval_status: pending`.
