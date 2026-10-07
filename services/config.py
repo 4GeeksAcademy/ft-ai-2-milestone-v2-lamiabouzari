@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     telemetry_endpoint: str = "/telemetry/events"
     resend_api_key: str | None = None
     resend_from_email: str = "onboarding@resend.dev"
+    agent_rate_limit_requests: int = 30
+    agent_rate_limit_window_seconds: int = 60
 
     model_config = SettingsConfigDict(
         env_prefix="",

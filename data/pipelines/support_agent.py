@@ -6,6 +6,7 @@ enforcement run in this graph. Retrieved documents and MCP payloads stay data.
 
 from __future__ import annotations
 
+import logging
 import re
 from contextvars import ContextVar
 from typing import Any, TypedDict
@@ -15,6 +16,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from data.pipelines import agent_memory, guardrails, mcp_tools, rag, support_utils
+
+logger = logging.getLogger(__name__)
 
 _INCIDENT_KEYWORDS = re.compile(r"\b(incident|ticket|case)\b", re.IGNORECASE)
 _JAILBREAK_PATTERNS = (
@@ -103,6 +106,36 @@ _INCIDENT_FALLBACKS = {
     "authorization": "I do not have permission to look up that incident right now. Please try again later.",
     "error": "I was unable to reach the incident manager right now. Please try again later.",
 }
+
+
+def _log_agent_decision(result: dict[str, Any]) -> None:
+    """Record one support turn without the question text or customer address."""
+    trace = result.get("trace") or []
+    node = "none"
+    guardrail = "none"
+    if trace and isinstance(trace[-1], dict):
+        node = str(trace[-1].get("node") or "none")
+    for entry in trace:
+        if not isinstance(entry, dict):
+            continue
+        output = entry.get("output") or {}
+        if not isinstance(output, dict):
+            continue
+        reason = output.get("guardrail_reason") or output.get("reason")
+        if reason:
+            guardrail = str(reason)
+    if guardrail != "none":
+        outcome = "refused"
+    elif result.get("error"):
+        outcome = "error"
+    else:
+        outcome = "completed"
+    logger.info(
+        "agent_decision action=support_turn node=%s outcome=%s guardrail=%s",
+        node,
+        outcome,
+        guardrail,
+    )
 
 
 def _trace_entry(
@@ -517,7 +550,9 @@ def run_support_agent(
     if prepared is not None:
         resolution = prepared.get("memory_resolution")
         if prepared.get("skip_graph"):
-            return {**prepared["result"], "thread_id": run_id}
+            result = {**prepared["result"], "thread_id": run_id}
+            _log_agent_decision(result)
+            return result
         question_for_graph = str(prepared.get("question") or question)
     token = _SESSION.set(session)
     try:
@@ -548,7 +583,9 @@ def run_support_agent(
         result = {**result, "memory_proposal": None}
     if resolution is not None:
         result["memory_resolution"] = resolution
-    return {**result, "thread_id": run_id}
+    result = {**result, "thread_id": run_id}
+    _log_agent_decision(result)
+    return result
 
 
 def get_support_agent_checkpoint(thread_id: str) -> dict[str, Any] | None:
