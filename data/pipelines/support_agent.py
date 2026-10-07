@@ -182,12 +182,13 @@ def validate_question(state: SupportAgentState) -> dict[str, Any]:
     question = state.get("question", "").strip()
     error = None if question else _INVALID_QUESTION
     guardrail_reason = None
-    if question and _jailbreak_attempt(question):
+    order_id = guardrails.extract_order_id(question) if question else None
+    if question and order_id and not _order_is_authorized(order_id):
+        guardrail_reason = "unauthorized_order"
+    elif question and _jailbreak_attempt(question):
         guardrail_reason = "jailbreak"
     elif question and _scope_guardrail(question) and not agent_memory.allows_operational_update(question):
         guardrail_reason = "out_of_scope"
-    elif question and (order_id := guardrails.extract_order_id(question)) and not _order_is_authorized(order_id):
-        guardrail_reason = "unauthorized_order"
     country_enforcement = None
     if question and error is None and guardrail_reason is None:
         country_enforcement = guardrails.detect_country_policy_conflict(question)

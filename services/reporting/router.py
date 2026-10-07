@@ -7,10 +7,12 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import text
 
 from database import get_inventory_engine
+from dependencies import get_current_user
+from models.user import UserPublic
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PIPELINES_DIR = _REPO_ROOT / "data" / "pipelines"
@@ -25,6 +27,7 @@ router = APIRouter(prefix="/reporting", tags=["reporting"])
 @router.get("/weekly-warehouse-client-performance")
 def weekly_warehouse_client_performance(
     week_start: date | None = Query(default=None),
+    _user: UserPublic = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Return all KPI rows for the requested or latest computed week."""
     with get_inventory_engine().connect() as connection:
@@ -59,7 +62,7 @@ def weekly_warehouse_client_performance(
 
 
 @router.get("/pipeline-runs/latest")
-def latest_pipeline_run() -> dict[str, Any]:
+def latest_pipeline_run(_user: UserPublic = Depends(get_current_user)) -> dict[str, Any]:
     """Return the most recently started pipeline run."""
     with get_inventory_engine().connect() as connection:
         row = connection.execute(
@@ -81,6 +84,7 @@ def latest_pipeline_run() -> dict[str, Any]:
 @router.post("/pipeline-runs", status_code=status.HTTP_202_ACCEPTED)
 def trigger_pipeline(
     week_start: date | None = Query(default=None),
+    _user: UserPublic = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Queue the weekly performance pipeline on the independent worker."""
     task = run_weekly_warehouse_client_performance.apply_async(

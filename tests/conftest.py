@@ -19,6 +19,7 @@ import database  # noqa: E402
 import dependencies  # noqa: E402
 from routers import auth  # noqa: E402
 from routers import profiles  # noqa: E402
+from routers import users as users_router  # noqa: E402
 from main import app  # noqa: E402
 
 
@@ -29,6 +30,7 @@ def auth_db(monkeypatch: pytest.MonkeyPatch) -> TinyDB:
     monkeypatch.setattr(database, "get_db", lambda: db)
     monkeypatch.setattr(auth, "get_db", lambda: db)
     monkeypatch.setattr(profiles, "get_db", lambda: db)
+    monkeypatch.setattr(users_router, "get_db", lambda: db)
     monkeypatch.setattr(dependencies, "get_db", lambda: db)
     return db
 

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from data.pipelines.support_agent import run_support_agent
+from dependencies import get_current_user
+from models.user import UserPublic
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -24,7 +26,10 @@ class AgentQueryResponse(BaseModel):
 
 
 @router.post("/query", response_model=AgentQueryResponse)
-def agent_query(request: AgentQueryRequest) -> AgentQueryResponse:
+def agent_query(
+    request: AgentQueryRequest,
+    _user: UserPublic = Depends(get_current_user),
+) -> AgentQueryResponse:
     """Invoke the agent graph and return its answer and execution trace."""
     try:
         result = run_support_agent(request.question)

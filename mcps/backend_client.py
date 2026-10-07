@@ -36,6 +36,19 @@ def get_timeout_seconds() -> float:
         return DEFAULT_TIMEOUT_SECONDS
 
 
+def _auth_headers() -> dict[str, str]:
+    """Forward a TrackFlow service JWT when TRACKFLOW_API_TOKEN is set.
+
+    Incident and inventory routes require the same bearer tokens as the rest
+    of the API. The token is never logged and is omitted when unset so local
+    unit tests can keep mocking the HTTP transport.
+    """
+    token = os.environ.get("TRACKFLOW_API_TOKEN", "").strip()
+    if not token:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
+
+
 def _client() -> httpx.AsyncClient:
     """Build the httpx client used for backend calls.
 
@@ -71,7 +84,9 @@ async def request_json(
     """
     try:
         async with _client() as client:
-            response = await client.request(method, path, json=json, params=params)
+            response = await client.request(
+                method, path, json=json, params=params, headers=_auth_headers()
+            )
     except httpx.TimeoutException as exc:
         raise BackendTimeoutError(
             f"TrackFlow backend timed out calling {method} {path}."

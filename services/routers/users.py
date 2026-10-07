@@ -53,7 +53,9 @@ def _find_user_by_uuid(users_table, user_uuid: uuid.UUID) -> tuple[User, int]:
 def list_users(
     _current_user: UserPublic = Depends(get_current_user),
 ) -> list[UserPublic]:
-    """Return all users. Authentication required."""
+    """Return all users. Administrators only."""
+    if _current_user.role != UserRole.admin:
+        raise forbidden()
     db = get_db()
     users_table = db.table("users")
 
@@ -71,13 +73,15 @@ def list_users(
 @router.get("/{user_id}", response_model=UserPublic)
 def get_user(
     user_id: str,
-    _current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_current_user),
 ) -> UserPublic:
-    """Return a user's public profile by UUID. Authentication required."""
+    """Return a user's public profile. Callers may read only their own record unless they are admins."""
     db = get_db()
     users_table = db.table("users")
 
     user_uuid = _parse_user_id(user_id)
+    if current_user.role != UserRole.admin and current_user.id != user_uuid:
+        raise forbidden()
     user, _doc_id = _find_user_by_uuid(users_table, user_uuid)
 
     return UserPublic.model_validate(user)
