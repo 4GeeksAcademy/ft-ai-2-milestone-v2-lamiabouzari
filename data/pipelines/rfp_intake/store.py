@@ -16,10 +16,13 @@ from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, select
 
 from models.rfp import (
+    RfpApprovalCheckpoint,
     RfpDepartmentSection,
+    RfpFinalDocument,
     RfpMetadataRecord,
     RfpSynthesizerRecord,
     RfpTicket,
+    RfpTraceRecord,
 )
 
 _engine: Engine | None = None
@@ -51,6 +54,9 @@ def create_tables(engine: Engine | None = None) -> None:
             RfpMetadataRecord.__table__,
             RfpDepartmentSection.__table__,
             RfpSynthesizerRecord.__table__,
+            RfpApprovalCheckpoint.__table__,
+            RfpTraceRecord.__table__,
+            RfpFinalDocument.__table__,
         ],
     )
 
@@ -207,6 +213,15 @@ def ticket_snapshot(ticket_id: str) -> dict[str, Any] | None:
         synthesis = session.exec(
             select(RfpSynthesizerRecord).where(RfpSynthesizerRecord.ticket_id == ticket_id)
         ).first()
+        checkpoints = session.exec(
+            select(RfpApprovalCheckpoint).where(RfpApprovalCheckpoint.ticket_id == ticket_id)
+        ).all()
+        traces = session.exec(
+            select(RfpTraceRecord).where(RfpTraceRecord.ticket_id == ticket_id).order_by(RfpTraceRecord.id)
+        ).all()
+        final_document = session.exec(
+            select(RfpFinalDocument).where(RfpFinalDocument.ticket_id == ticket_id)
+        ).first()
         return {
             "ticket_id": ticket.id,
             "status": ticket.status,
@@ -219,6 +234,8 @@ def ticket_snapshot(ticket_id: str) -> dict[str, Any] | None:
             "routing_handoff": ticket.routing_handoff,
             "part3_handoff_ready": ticket.part3_handoff_ready,
             "part3_handoff": ticket.part3_handoff,
+            "open_conflicts": ticket.open_conflicts or [],
+            "arbitration_iterations": ticket.arbitration_iterations,
             "created_at": ticket.created_at.isoformat(),
             "updated_at": ticket.updated_at.isoformat(),
             "metadata": _metadata_payload(metadata),
@@ -226,6 +243,9 @@ def ticket_snapshot(ticket_id: str) -> dict[str, Any] | None:
             "synthesizer": None
             if synthesis is None
             else {"sales_summary": synthesis.sales_summary, "payload": synthesis.payload},
+            "approvals": [_approval_payload(row) for row in checkpoints],
+            "traces": [_trace_payload(row) for row in traces],
+            "final_document": None if final_document is None else _final_payload(final_document),
         }
 
 
@@ -261,4 +281,50 @@ def _section_payload(section: RfpDepartmentSection) -> dict[str, Any]:
         "section_status": section.section_status,
         "approval_status": section.approval_status,
         "needs_human_review": section.needs_human_review,
+    }
+
+
+def _approval_payload(row: RfpApprovalCheckpoint) -> dict[str, Any]:
+    state = row.state or {}
+    return {
+        "thread_id": row.thread_id,
+        "department_id": row.department_key,
+        "department_name": state.get("department_name"),
+        "owner": state.get("owner"),
+        "draft_content": state.get("draft_content") or "",
+        "evaluation_results": state.get("evaluation_result"),
+        "iteration_count": state.get("iteration_count") or 0,
+        "approval_status": state.get("approval_status") or "pending",
+        "interrupted": row.interrupted,
+        "node": row.node,
+        "revision_count": row.revision_count,
+        "comment": state.get("comment"),
+        "requested_changes": state.get("requested_changes"),
+        "actions": ["approve", "reject", "request_changes"] if row.interrupted else [],
+    }
+
+
+def _trace_payload(row: RfpTraceRecord) -> dict[str, Any]:
+    return {
+        "ts": row.ts.isoformat(),
+        "agent": row.agent,
+        "ticket_id": row.ticket_id,
+        "department": row.department,
+        "input_ref": row.input_ref,
+        "output_ref": row.output_ref,
+        "action": row.action,
+    }
+
+
+def _final_payload(row: RfpFinalDocument) -> dict[str, Any]:
+    return {
+        "ticket_id": row.ticket_id,
+        "document_markdown": row.document_markdown,
+        "client_name": row.client_name,
+        "client_country": row.client_country,
+        "currency_context": row.currency_context,
+        "approved_sections": row.approved_sections or [],
+        "approvers": row.approvers or [],
+        "generated_at": row.generated_at.isoformat(),
+        "trace_ref": row.trace_ref,
     }

@@ -6,7 +6,10 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
 
+from data.pipelines.rfp_approval.decisions import ApprovalError
+from data.pipelines.rfp_approval.pipeline import Part3NotReady, apply_arbitration, resume_approval, start_approval
 from data.pipelines.rfp_intake.pipeline import process_ticket
 from data.pipelines.rfp_intake.store import create_tables, create_ticket, get_engine, list_tickets, ticket_snapshot
 from data.pipelines.rfp_response.pipeline import Part2NotReady, run_response
@@ -83,3 +86,70 @@ def generate_response(ticket_id: str, _user: UserPublic = Depends(get_current_us
         raise HTTPException(status_code=404, detail="Ticket not found.") from None
     except Part2NotReady as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+class ApprovalDecision(BaseModel):
+    department: str
+    decision: str
+    actor: str
+    comment: str = ""
+    requested_changes: str | None = None
+
+
+def _approval_http(exc: Exception) -> HTTPException:
+    if isinstance(exc, KeyError):
+        return HTTPException(status_code=404, detail="Ticket not found.")
+    if isinstance(exc, Part3NotReady):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, ApprovalError):
+        return HTTPException(status_code=400, detail=str(exc))
+    raise exc
+
+
+@router.post("/tickets/{ticket_id}/approval")
+def open_approval(ticket_id: str, _user: UserPublic = Depends(get_current_user)) -> dict:
+    """Open per-department approval interrupts from the persisted Part 2 drafts."""
+    _ensure_store()
+    try:
+        return start_approval(ticket_id)
+    except (KeyError, Part3NotReady, ApprovalError) as exc:
+        raise _approval_http(exc) from exc
+
+
+@router.post("/tickets/{ticket_id}/approval/resume")
+def resume_department_approval(
+    ticket_id: str,
+    body: ApprovalDecision,
+    _user: UserPublic = Depends(get_current_user),
+) -> dict:
+    """Apply one human decision and continue that department checkpoint only."""
+    _ensure_store()
+    try:
+        return resume_approval(ticket_id, body.model_dump())
+    except (KeyError, Part3NotReady, ApprovalError) as exc:
+        raise _approval_http(exc) from exc
+
+
+@router.post("/tickets/{ticket_id}/arbitration")
+def arbitrate_ticket(ticket_id: str, _user: UserPublic = Depends(get_current_user)) -> dict:
+    """Run the fixed arbitration rules against structured section state."""
+    _ensure_store()
+    try:
+        result = apply_arbitration(ticket_id)
+        snapshot = ticket_snapshot(ticket_id)
+    except (KeyError, Part3NotReady, ApprovalError) as exc:
+        raise _approval_http(exc) from exc
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Ticket not found.")
+    return {"arbitration": result, "ticket": snapshot}
+
+
+@router.get("/tickets/{ticket_id}/document")
+def get_final_document(ticket_id: str, _user: UserPublic = Depends(get_current_user)) -> dict:
+    _ensure_store()
+    snapshot = ticket_snapshot(ticket_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Ticket not found.")
+    if snapshot.get("final_document") is None:
+        raise HTTPException(status_code=404, detail="Final document is not ready.")
+    return snapshot["final_document"]

@@ -11,6 +11,7 @@ from sqlmodel import Field, SQLModel
 
 # Part 1: analyzing | intake_complete | discarded
 # Part 2: drafting | under_evaluation | needs_human_review
+# Part 3: waiting_for_approval | done
 TicketStatus = str
 
 
@@ -36,6 +37,8 @@ class RfpTicket(SQLModel, table=True):
     routing_handoff: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     part3_handoff_ready: bool = False
     part3_handoff: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    open_conflicts: list[Any] | None = Field(default=None, sa_column=Column(JSON))
+    arbitration_iterations: int = 0
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
 
@@ -80,6 +83,54 @@ class RfpDepartmentSection(SQLModel, table=True):
     section_status: str | None = None
     approval_status: str | None = None
     needs_human_review: bool = False
+
+
+class RfpApprovalCheckpoint(SQLModel, table=True):
+    """Durable per-department approval interrupt. One row per thread_id."""
+
+    __tablename__ = "rfp_approval_checkpoints"
+
+    id: int | None = Field(default=None, primary_key=True)
+    ticket_id: str = Field(foreign_key="rfp_tickets.id", index=True)
+    department_key: str
+    thread_id: str = Field(unique=True, index=True)
+    node: str = "approval_interrupt"
+    interrupted: bool = True
+    revision_count: int = 0
+    state: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class RfpTraceRecord(SQLModel, table=True):
+    """Ordered record of Part 3 nodes. This is the trace, not a server log."""
+
+    __tablename__ = "rfp_traces"
+
+    id: int | None = Field(default=None, primary_key=True)
+    ticket_id: str = Field(foreign_key="rfp_tickets.id", index=True)
+    ts: datetime = Field(default_factory=_now)
+    agent: str
+    department: str | None = None
+    input_ref: str = ""
+    output_ref: str = ""
+    action: str
+
+
+class RfpFinalDocument(SQLModel, table=True):
+    """Approved proposal stored for Sales. Written before the ticket is done."""
+
+    __tablename__ = "rfp_final_documents"
+
+    id: int | None = Field(default=None, primary_key=True)
+    ticket_id: str = Field(foreign_key="rfp_tickets.id", unique=True)
+    document_markdown: str
+    client_name: str | None = None
+    client_country: str | None = None
+    currency_context: str | None = None
+    approved_sections: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
+    approvers: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
+    generated_at: datetime = Field(default_factory=_now)
+    trace_ref: str | None = None
 
 
 class RfpSynthesizerRecord(SQLModel, table=True):
