@@ -10,17 +10,13 @@ import pytest
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT / "services"))
 
-from celery.exceptions import Retry  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-
 import dlq  # noqa: E402
 import routers.tasks as task_router  # noqa: E402
-from main import app  # noqa: E402
 from reporting import router as reporting_router  # noqa: E402
 from tasks import pipeline_tasks  # noqa: E402
 
 
-def test_trigger_returns_celery_id_and_serializes_week(monkeypatch):
+def test_trigger_returns_celery_id_and_serializes_week(monkeypatch, auth_client, registered_user):
     captured = {}
 
     def fake_apply_async(*, args):
@@ -28,8 +24,15 @@ def test_trigger_returns_celery_id_and_serializes_week(monkeypatch):
         return SimpleNamespace(id="celery-123")
 
     monkeypatch.setattr(reporting_router.run_weekly_warehouse_client_performance, "apply_async", fake_apply_async)
-    with TestClient(app) as client:
-        response = client.post("/reporting/pipeline-runs?week_start=2026-09-14")
+    login = auth_client.post(
+        "/auth/login",
+        json={"email": "alice@example.com", "password": "correct-horse"},
+    )
+    assert login.status_code == 200, login.text
+    response = auth_client.post(
+        "/reporting/pipeline-runs?week_start=2026-09-14",
+        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+    )
 
     assert response.status_code == 202
     assert response.json() == {"task_id": "celery-123"}

@@ -77,6 +77,7 @@ def token_invalid() -> AppException:
 
 
 def forbidden() -> AppException:
+    logger.warning("access denied")
     return AppException(status.HTTP_403_FORBIDDEN, "You can only update your own profile", ERROR_CODES["FORBIDDEN"])
 
 

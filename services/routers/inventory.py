@@ -58,7 +58,10 @@ def _sku_response(session: Session, sku: SKU) -> SKUResponse:
 
 
 @router.get("/products", response_model=list[SKUResponse])
-def list_products(session: Session = Depends(get_inventory_db)) -> list[SKUResponse]:
+def list_products(
+    _user: UserPublic = Depends(get_current_user),
+    session: Session = Depends(get_inventory_db),
+) -> list[SKUResponse]:
     products = session.exec(select(SKU).order_by(SKU.id)).all()
     return [_sku_response(session, product) for product in products]
 
@@ -66,6 +69,7 @@ def list_products(session: Session = Depends(get_inventory_db)) -> list[SKURespo
 @router.post("/products", response_model=SKUResponse, status_code=status.HTTP_201_CREATED)
 def create_product(
     body: SKUCreate,
+    _user: UserPublic = Depends(get_current_user),
     session: Session = Depends(get_inventory_db),
 ) -> SKUResponse:
     product = SKU(**body.model_dump())
@@ -76,7 +80,11 @@ def create_product(
 
 
 @router.get("/products/{product_id}", response_model=SKUResponse)
-def get_product(product_id: int, session: Session = Depends(get_inventory_db)) -> SKUResponse:
+def get_product(
+    product_id: int,
+    _user: UserPublic = Depends(get_current_user),
+    session: Session = Depends(get_inventory_db),
+) -> SKUResponse:
     product = session.get(SKU, product_id)
     if product is None:
         raise AppException(404, "SKU not found", "NOT_FOUND")
@@ -141,7 +149,10 @@ def create_outbound(
 
 
 @router.get("/orders", response_model=list[OrderResponse])
-def list_orders(session: Session = Depends(get_inventory_db)) -> list[OrderResponse]:
+def list_orders(
+    _user: UserPublic = Depends(get_current_user),
+    session: Session = Depends(get_inventory_db),
+) -> list[OrderResponse]:
     inbound_rows = session.exec(select(StockEntry, SKU).join(SKU, StockEntry.sku_id == SKU.id)).all()
     outbound_rows = session.exec(select(StockExit, SKU).join(SKU, StockExit.sku_id == SKU.id)).all()
 

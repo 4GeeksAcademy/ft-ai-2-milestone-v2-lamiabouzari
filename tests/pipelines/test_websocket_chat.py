@@ -444,7 +444,7 @@ def test_reconnect_rehydrates_the_same_session(auth_client, registered_user, cha
     assert any(message["role"] == "assistant" and "Return" in message["text"] for message in messages)
 
 
-def test_agent_query_stays_on_the_non_streaming_path(auth_client, monkeypatch):
+def test_agent_query_stays_on_the_non_streaming_path(auth_client, registered_user, monkeypatch):
     from data.pipelines.support_agent import bind_token_stream, run_support_agent, unbind_token_stream
     from data.pipelines.support_agent import _TOKEN_SINK
 
@@ -492,7 +492,16 @@ def test_agent_query_stays_on_the_non_streaming_path(auth_client, monkeypatch):
     worker.start()
     assert held.wait(timeout=3)
     try:
-        response = auth_client.post("/agent/query", json={"question": QUESTION})
+        login = auth_client.post(
+            "/auth/login",
+            json={"email": "alice@example.com", "password": "correct-horse"},
+        )
+        assert login.status_code == 200, login.text
+        response = auth_client.post(
+            "/agent/query",
+            json={"question": QUESTION},
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+        )
         direct = run_support_agent(QUESTION)
     finally:
         release.set()

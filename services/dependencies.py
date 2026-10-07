@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import Depends
@@ -14,6 +15,7 @@ from exceptions import token_invalid, token_missing_sub
 from models.user import User, UserPublic
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+logger = logging.getLogger(__name__)
 
 
 def get_current_user(
@@ -32,6 +34,7 @@ def get_current_user(
             raise token_missing_sub()
         user_id = uuid.UUID(user_id_str)
     except (JWTError, ValueError):
+        logger.warning("authentication failed: invalid or expired token")
         raise token_invalid()
 
     db = get_db()

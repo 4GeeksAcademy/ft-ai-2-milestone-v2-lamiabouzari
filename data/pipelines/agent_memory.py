@@ -70,6 +70,11 @@ _PACKAGE_ID = re.compile(
     r"\b(?:package|parcel|tracking(?:\s+number)?)\s*#?\s*[A-Z]{1,4}\d{3,}\b",
     re.IGNORECASE,
 )
+_CARRIER_OVERRIDE = re.compile(
+    r"\balways\b.{0,80}\b(?:assign|use|pick|choose)\b.{0,40}\b(?:most expensive\s+)?carrier\b"
+    r"|\bignore\b.{0,40}\b(?:official|company)\b.{0,40}\bcarrier\b",
+    re.IGNORECASE | re.DOTALL,
+)
 _NEGOTIATION = re.compile(
     r"\b(?:negotiat\w*|contract negotiation|active contract|proposed (?:rate|discount|terms)|"
     r"commercial terms)\b",
@@ -136,6 +141,8 @@ def forbidden_reason(fact: str) -> str | None:
     _isolated, injected = guardrails.isolate_untrusted_text(fact)
     if injected:
         return "instruction_injection"
+    if _CARRIER_OVERRIDE.search(fact):
+        return "carrier_rule_override"
     if _NEGOTIATION.search(fact):
         return "commercial_negotiation"
     if _PACKAGE_ID.search(fact):

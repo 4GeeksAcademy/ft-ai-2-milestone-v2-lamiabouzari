@@ -10,6 +10,8 @@ from sqlalchemy import insert
 from sqlmodel import Session
 
 from database import get_inventory_db
+from dependencies import get_current_user
+from models.user import UserPublic
 from models.telemetry import TelemetryEvent, TelemetryEventRecord
 from telemetry.analysis import generate_report
 
@@ -100,6 +102,7 @@ def _parse_date(date_str: str | None, default: datetime) -> datetime:
 
 @router.get("/report")
 def telemetry_report(
+    _user: UserPublic = Depends(get_current_user),
     start_date: str | None = Query(
         default=None,
         description="Start of the report window (ISO 8601). Defaults to 7 days ago UTC.",
