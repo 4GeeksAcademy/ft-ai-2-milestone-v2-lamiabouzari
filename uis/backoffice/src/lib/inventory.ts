@@ -79,7 +79,7 @@ export interface Order {
 }
 
 export function listProducts(): Promise<Product[]> {
-  return apiRequest<Product[]>("/inventory/products");
+  return apiRequest<Product[]>("/inventory/products", { auth: true });
 }
 
 export function createProduct(input: ProductCreateInput): Promise<Product> {
@@ -107,5 +107,5 @@ export function createOutboundOrder(input: OutboundOrderInput): Promise<StockExi
 }
 
 export function listOrders(): Promise<Order[]> {
-  return apiRequest<Order[]>("/inventory/orders");
+  return apiRequest<Order[]>("/inventory/orders", { auth: true });
 }
