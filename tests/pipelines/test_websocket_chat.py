@@ -647,3 +647,70 @@ def test_reconnect_backoff_is_progressive():
     assert next_backoff_ms(10) == 30000
     source = (ROOT / "uis" / "backoffice" / "src" / "lib" / "cx-chat.ts").read_text(encoding="utf-8")
     assert "Math.min(1000 * 2 ** attempt, 30_000)" in source
+
+
+def test_two_turns_in_one_session_both_complete(auth_client, registered_user, chat_db, agent):
+    token = _login(auth_client)
+    session = _open_session(auth_client, token)
+    session_id = session["session_id"]
+    questions = [QUESTION, RETURN_QUESTION]
+    with auth_client.websocket_connect(_ws_url(session_id, token)) as websocket:
+        assert websocket.receive_json()["event"] == "session_snapshot"
+        completions = []
+        for question in questions:
+            websocket.send_json(
+                {"event": "user_message", "data": {"session_id": session_id, "text": question}}
+            )
+            frames = _frames_until(websocket, "generation_completed")
+            completions.append(frames[-1])
+            sequences = [frame["data"]["sequence"] for frame in frames if frame["event"] == "token_chunk"]
+            assert sequences[0] == 1
+            assert frames[-1]["event"] == "generation_completed"
+    assert agent.calls == questions
+    assert stream.active_generation(session_id) is None
+    task = stream.generation_task(session_id)
+    assert task is None or task.done()
+    stored = store.list_messages(session_id)
+    assert [row.status for row in stored if row.role == "assistant"] == ["complete", "complete"]
+    assert completions[0]["data"]["message_id"] != completions[1]["data"]["message_id"]
+
+
+def test_failed_generation_is_shown_and_the_next_turn_runs(auth_client, registered_user, chat_db, agent, monkeypatch):
+    real = stream.run_support_agent
+    calls = {"n": 0}
+
+    def flaky(question, thread_id=None, session=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("downstream unavailable")
+        return real(question, thread_id=thread_id, session=session)
+
+    monkeypatch.setattr(stream, "run_support_agent", flaky)
+    token = _login(auth_client)
+    session = _open_session(auth_client, token)
+    session_id = session["session_id"]
+    with auth_client.websocket_connect(_ws_url(session_id, token)) as websocket:
+        assert websocket.receive_json()["event"] == "session_snapshot"
+        websocket.send_json(
+            {"event": "user_message", "data": {"session_id": session_id, "text": QUESTION}}
+        )
+        failed = _frames_until(websocket, "generation_failed")
+        websocket.send_json(
+            {"event": "user_message", "data": {"session_id": session_id, "text": RETURN_QUESTION}}
+        )
+        completed = _frames_until(websocket, "generation_completed")
+    failure = failed[-1]
+    assert failure["event"] == "generation_failed"
+    assert failure["data"]["session_id"] == session_id
+    assert "downstream" not in str(failure)
+    assert "could not complete" in failure["data"]["message"]
+    saved = store.get_message(failure["data"]["message_id"])
+    assert saved is not None
+    assert saved.status == "failed"
+    assert saved.text == failure["data"]["message"]
+    assert stream.active_generation(session_id) is None
+    assert completed[-1]["event"] == "generation_completed"
+    assert agent.calls == [RETURN_QUESTION]
+    page = (ROOT / "uis" / "backoffice" / "src" / "app" / "knowledge" / "page.tsx").read_text(encoding="utf-8")
+    assert "seenSequence.current = 0" in page
+    assert "generation_failed" in (ROOT / "uis" / "backoffice" / "src" / "lib" / "cx-chat.ts").read_text(encoding="utf-8")

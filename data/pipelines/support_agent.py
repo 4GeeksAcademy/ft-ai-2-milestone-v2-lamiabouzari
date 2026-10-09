@@ -43,6 +43,7 @@ _OUT_OF_SCOPE_TASKS = re.compile(
 _TRACKFLOW_TOPICS = re.compile(
     r"\b(trackflow|shipment|shipping|tracking|order|track (my |the )?(package|parcel|order)|"
     r"package|parcel|delivery|deliveries|return|returns|refund|sla|service level|"
+    r"storage|discount|pricing|"
     r"incident|ticket|case|lost (package|parcel|shipment)|failed delivery|wrong address|"
     r"address change|courier|carriers|carrier|logistics|dispatch)\b",
     re.IGNORECASE,

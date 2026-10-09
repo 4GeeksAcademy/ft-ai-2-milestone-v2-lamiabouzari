@@ -30,9 +30,13 @@ The public website includes:
 
 ## Local authentication
 
-Backoffice login is handled by the FastAPI app in `services/`. Accounts live in TinyDB, not Postgres. `DATABASE_PATH` defaults to `data/db.json` relative to the process working directory. The local API is started from `services/`, so the file in use is `services/data/db.json`. The repo-root `data/db.json` is a different file. `DATABASE_URL` points at Postgres for inventory, telemetry, RFP, and Support Agent chat sessions. Accounts stay in TinyDB.
+Backoffice login is handled by the FastAPI app in `services/`. Accounts live in TinyDB, not Postgres. `DATABASE_PATH` defaults to `data/db.json` relative to the process working directory. The local API is started from `services/`, so the file in use is `services/data/db.json`. The repo-root `data/db.json` is a different file. `DATABASE_URL` points at Postgres for inventory, telemetry, RFP, and Support Agent chat sessions. The SQLAlchemy engine keeps a small pool and checks connections before reuse. Chat token text is queued onto that pool instead of opening a connection for every delta. Accounts stay in TinyDB.
 
 The local demo account is `dev@example.com` with role `admin`. Its password is hashed with the existing bcrypt `CryptContext` in `services/routers/auth.py`.
+
+## Knowledge retrieval
+
+Company policy lives in the four Markdown files under `docs/company-knowledge-base/` and is indexed by `python -m data.process.rag`. Retrieval keeps chunks at or above score 0.25. When `OPENAI_API_KEY` is unset, indexing uses a normalized bag-of-words vector over those documents' own vocabulary in the Qdrant collection `trackflow_knowledge`, and answers are the retrieved section text after the existing business safeguards. When the key is set, embedding and generation use the configured OpenAI-compatible models, and those vectors are stored in `trackflow_knowledge_provider` so the local index is not replaced. A question with no supporting chunk still receives the safe refusal.
 
 ## Development Requirements
 

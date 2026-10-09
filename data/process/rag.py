@@ -5,12 +5,14 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
 
 COMPANY = "trackflow"
 COLLECTION_NAME = "trackflow_knowledge"
+PROVIDER_COLLECTION_NAME = "trackflow_knowledge_provider"
 DOCUMENT_DIR = Path(__file__).resolve().parents[2] / "docs" / "company-knowledge-base"
 SOURCE_DOCUMENTS = (
     "trackflow-sla-delivery.en.md",
@@ -21,19 +23,124 @@ SOURCE_DOCUMENTS = (
 POINT_NAMESPACE = uuid.UUID("caa89d3c-f2e1-4fee-b32c-67816fa3c8df")
 
 
+_TOKEN = re.compile(r"[a-z0-9']+")
+_STOPWORDS = frozenset(
+    {
+        "the", "and", "for", "with", "that", "this", "are", "not", "from", "must",
+        "any", "before", "than", "into", "does", "what", "how", "can", "our", "you",
+        "your", "its", "have", "has", "but", "about", "during", "other", "when",
+        "who", "whose", "which", "will", "may", "should", "would", "could", "an",
+        "of", "to", "in", "on", "or", "is", "it", "be", "as", "by", "if", "do", "we",
+    }
+)
+_vocabulary_cache: list[str] | None = None
+
+
+def _content_tokens(text: str) -> list[str]:
+    return [
+        token
+        for token in _TOKEN.findall(text.lower())
+        if len(token) > 2 and token not in _STOPWORDS
+    ]
+
+
+def _source_vocabulary() -> list[str]:
+    """Stable term list from the four source files, shared by index and query."""
+    global _vocabulary_cache
+    if _vocabulary_cache is None:
+        seen: set[str] = set()
+        terms: list[str] = []
+        for filename in SOURCE_DOCUMENTS:
+            for token in _content_tokens((DOCUMENT_DIR / filename).read_text(encoding="utf-8")):
+                if token in seen:
+                    continue
+                seen.add(token)
+                terms.append(token)
+        _vocabulary_cache = terms
+    return _vocabulary_cache
+
+
+def _term_indexes(token: str, positions: dict[str, int]) -> list[int]:
+    """Match a token and its un-/non- negated source form.
+
+    Questions say "documented" while the carrier policy says "undocumented".
+    Counting both terms keeps that section above the retrieval threshold.
+    """
+    found: list[int] = []
+
+    def add(term: str) -> None:
+        index = positions.get(term)
+        if index is not None and index not in found:
+            found.append(index)
+
+    add(token)
+    for prefix in ("un", "non"):
+        add(prefix + token)
+        if token.startswith(prefix) and len(token) > len(prefix) + 2:
+            add(token[len(prefix) :])
+    return found
+
+
+def _local_embed(text: str) -> list[float]:
+    """Cosine-ready bag-of-words vector used when no embedding provider is configured.
+
+    The last component is reserved for text that shares no source terms, so a
+    zero-overlap question does not become an undefined vector.
+    """
+    vocabulary = _source_vocabulary()
+    positions = {token: index for index, token in enumerate(vocabulary)}
+    vector = [0.0] * (len(vocabulary) + 1)
+    for token in _content_tokens(text):
+        for index in _term_indexes(token, positions):
+            vector[index] += 1.0
+    norm = sum(value * value for value in vector) ** 0.5
+    if norm == 0.0:
+        vector[-1] = 1.0
+        return vector
+    return [value / norm for value in vector]
+
+
+def active_collection() -> str:
+    """Return the collection whose stored vectors match the embedder in use.
+
+    The local bag-of-words index stays in ``trackflow_knowledge``. Provider
+    embeddings use a separate collection so switching models does not delete it.
+    """
+    if os.getenv("OPENAI_API_KEY"):
+        return PROVIDER_COLLECTION_NAME
+    return COLLECTION_NAME
+
+
+_openai_client = None
+_openai_lock = threading.Lock()
+
+
+def openai_client():
+    """Return one OpenAI-compatible client so later calls reuse its connection."""
+    global _openai_client
+    if _openai_client is None:
+        with _openai_lock:
+            if _openai_client is None:
+                from openai import OpenAI
+
+                _openai_client = OpenAI(
+                    api_key=os.environ["OPENAI_API_KEY"],
+                    base_url=os.getenv("OPENAI_BASE_URL") or None,
+                )
+    return _openai_client
+
+
 def embed(text: str) -> list[float]:
-    """Embed text using the dedicated OpenAI-compatible embedding model.
+    """Embed text with the configured provider, or the local source vocabulary.
 
     ``OPENAI_BASE_URL`` can point to an OpenAI-compatible provider. The
     embedding model is intentionally distinct from the answer-generation model.
+    When ``OPENAI_API_KEY`` is unset, indexing still uses the company documents.
     """
-    from openai import OpenAI
+    if not os.getenv("OPENAI_API_KEY"):
+        return _local_embed(text)
 
-    client = OpenAI(
-        api_key=os.environ["OPENAI_API_KEY"],
-        base_url=os.getenv("OPENAI_BASE_URL") or None,
-    )
-    response = client.embeddings.create(
+    response = openai_client().embeddings.create(
         model=os.getenv(
             "RAG_EMBEDDING_MODEL",
             "downtown-miami/openrouter/perplexity/pplx-embed-v1-0.6b",
@@ -100,10 +207,11 @@ def _point_id(payload: dict[str, Any]) -> str:
 
 
 def setup() -> dict[str, int]:
-    """Rebuild ``trackflow_knowledge`` from all four complete source files.
+    """Index all four source files into the collection for the active embedder.
 
-    Deterministic point IDs make repeated runs reproducible. Recreating the
-    collection also removes stale chunks when a source document changes.
+    Deterministic point IDs make repeated runs reproducible. Only the active
+    collection is recreated. With a provider key set, that is
+    ``trackflow_knowledge_provider``; ``trackflow_knowledge`` is left as-is.
     """
     from qdrant_client import QdrantClient, models
 
@@ -121,12 +229,13 @@ def setup() -> dict[str, int]:
         api_key=api_key,
     )
 
+    collection_name = active_collection()
     client.recreate_collection(
-        collection_name=COLLECTION_NAME,
+        collection_name=collection_name,
         vectors_config=models.VectorParams(size=dimensions, distance=models.Distance.COSINE),
     )
     client.upsert(
-        collection_name=COLLECTION_NAME,
+        collection_name=collection_name,
         points=[
             models.PointStruct(id=_point_id(chunk), vector=vector, payload=chunk)
             for chunk, vector in zip(chunks, vectors, strict=True)
