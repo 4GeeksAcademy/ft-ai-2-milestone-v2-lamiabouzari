@@ -43,6 +43,7 @@ def _client_with_results(monkeypatch, points: list[Any]):
         {"Filter": Filter, "FieldCondition": FieldCondition, "MatchValue": MatchValue},
     )
     monkeypatch.setitem(sys.modules, "qdrant_client", qdrant)
+    monkeypatch.setattr(rag, "_qdrant_client", None)
     monkeypatch.setattr(rag, "embed", lambda _text: [0.1, 0.2])
     return fake
 
