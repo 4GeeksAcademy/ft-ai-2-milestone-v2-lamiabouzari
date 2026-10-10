@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+# The API seeds suppliers on startup. Tests must not write services/data/db.json.
+os.environ["SUPPLIERS_SEED_ON_STARTUP"] = "0"
 
 import pytest
 from fastapi.testclient import TestClient

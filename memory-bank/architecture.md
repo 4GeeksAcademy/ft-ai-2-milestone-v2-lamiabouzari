@@ -95,3 +95,7 @@ Mock catalog: `uis/website/src/data/catalog.ts` — imports types from `@repo/sh
 - Phase 7 close-out: `memory-bank/specs/phase-7-closeout.md`
 - View requirements: `uis/website_v1/SPEC.md`
 - Visual reference: `uis/website_v1/index.html`, `style.css`
+
+## Supplier directory
+
+TrackFlow supplier records are not retail catalog types. They live in the TinyDB table `suppliers`, with routes in `services/api` mounted on the existing FastAPI app. The backoffice page is `uis/backoffice/src/app/suppliers/page.tsx`. Field rules are in `CONTEXT-company.md`. Retail `CurrencyCode` stays EUR-only.

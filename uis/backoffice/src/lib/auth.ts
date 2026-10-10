@@ -5,6 +5,8 @@ const TOKEN_STORAGE_KEY = "backoffice_access_token";
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
+// Stay false until after hydration so a stored token does not disagree with the server HTML.
+let clientSnapshotReady = false;
 
 function notifyAuthChange(): void {
   listeners.forEach((listener) => listener());
@@ -13,6 +15,11 @@ function notifyAuthChange(): void {
 /** Subscribe to auth token changes (used by useSyncExternalStore). */
 export function subscribeToAuthChanges(listener: Listener): () => void {
   listeners.add(listener);
+  queueMicrotask(() => {
+    if (!listeners.has(listener)) return;
+    clientSnapshotReady = true;
+    listener();
+  });
   return () => listeners.delete(listener);
 }
 
@@ -65,11 +72,15 @@ export function logout(): void {
   clearToken();
 }
 
+function getAuthenticatedSnapshot(): boolean {
+  return clientSnapshotReady && isAuthenticated();
+}
+
 function getServerAuthSnapshot(): boolean {
   return false;
 }
 
 /** Reactive auth flag backed by localStorage, safe for SSR/hydration. */
 export function useIsAuthenticated(): boolean {
-  return useSyncExternalStore(subscribeToAuthChanges, isAuthenticated, getServerAuthSnapshot);
+  return useSyncExternalStore(subscribeToAuthChanges, getAuthenticatedSnapshot, getServerAuthSnapshot);
 }

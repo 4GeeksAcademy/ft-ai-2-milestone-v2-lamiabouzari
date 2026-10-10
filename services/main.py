@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -28,6 +29,7 @@ from exceptions import (
     generic_exception_handler,
     request_validation_exception_handler,
 )
+from api.router import router as suppliers_router
 from routers import agent, auth, chat, events, incidents, inventory, knowledge, profiles, rfp, tasks, telemetry, users
 from reporting import router as reporting_router
 
@@ -37,6 +39,12 @@ async def lifespan(_app: FastAPI):
     """Application lifespan — runs on startup and shutdown."""
     # Startup: ensure the database is initialised
     get_db()
+    # Insert the context suppliers when this process is a real server.
+    # Tests set SUPPLIERS_SEED_ON_STARTUP=0 so they never write the live file.
+    if os.getenv("SUPPLIERS_SEED_ON_STARTUP", "1") != "0":
+        from api.seed import seed_suppliers
+
+        seed_suppliers()
     # Inventory tables only apply when a Postgres DATABASE_URL is configured
     if settings.database_url:
         create_inventory_db_and_tables()
@@ -90,6 +98,7 @@ app.include_router(agent.router)
 app.include_router(rfp.router)
 app.include_router(events.router)
 app.include_router(chat.router)
+app.include_router(suppliers_router)
 
 @app.get("/health")
 def health_check() -> dict:
