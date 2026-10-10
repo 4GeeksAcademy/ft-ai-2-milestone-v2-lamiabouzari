@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useIsAuthenticated } from "@/lib/auth";
+import { isAuthenticated, useIsAuthenticated } from "@/lib/auth";
 
 interface RequireAuthProps {
   readonly children: React.ReactNode;
@@ -17,7 +17,9 @@ export function RequireAuth({ children }: RequireAuthProps) {
   const authenticated = useIsAuthenticated();
 
   useEffect(() => {
-    if (!authenticated) {
+    // Read localStorage inside the effect. The first render uses the server
+    // snapshot (logged out) and must not send an already signed-in user away.
+    if (!isAuthenticated()) {
       router.replace("/login");
     }
   }, [authenticated, router]);

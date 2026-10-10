@@ -100,15 +100,83 @@ def add_message(session_id: str, role: str, text: str, status: str) -> ChatMessa
         return row
 
 
-def update_message(message_id: str, text: str, status: str) -> None:
+class _MessagePersister:
+    """Write chat message text on one background thread.
+
+    Token updates are queued so streaming does not open a connection per
+    delta. A flush applies every queued write, in order, before it returns.
+    """
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._queue: list[tuple[str, str, str]] = []
+        self._writing = False
+        self._thread: threading.Thread | None = None
+
+    def submit(self, message_id: str, text: str, status: str) -> None:
+        with self._cond:
+            if self._thread is None:
+                self._thread = threading.Thread(
+                    target=self._loop,
+                    name="chat-message-writer",
+                    daemon=True,
+                )
+                self._thread.start()
+            self._queue.append((message_id, text, status))
+            self._cond.notify()
+
+    def flush(self) -> None:
+        with self._cond:
+            while self._queue or self._writing:
+                self._cond.wait()
+
+    def _loop(self) -> None:
+        while True:
+            with self._cond:
+                while not self._queue:
+                    self._cond.wait()
+                batch = self._queue
+                self._queue = []
+                self._writing = True
+            try:
+                _apply_message_batch(batch)
+            finally:
+                with self._cond:
+                    self._writing = False
+                    self._cond.notify_all()
+
+
+def _apply_message_batch(batch: list[tuple[str, str, str]]) -> None:
+    latest: dict[str, tuple[str, str]] = {}
+    order: list[str] = []
+    for message_id, text, status in batch:
+        if message_id not in latest:
+            order.append(message_id)
+        latest[message_id] = (text, status)
     with Session(get_engine(), expire_on_commit=False) as db:
-        row = db.get(ChatMessage, message_id)
-        if row is None:
-            return
-        row.text = text
-        row.status = status
-        db.add(row)
+        for message_id in order:
+            row = db.get(ChatMessage, message_id)
+            if row is None:
+                continue
+            text, status = latest[message_id]
+            row.text = text
+            row.status = status
+            db.add(row)
         db.commit()
+
+
+_persister = _MessagePersister()
+
+
+def queue_message_update(message_id: str, text: str, status: str) -> None:
+    """Record a message update without waiting for the database round trip."""
+    _persister.submit(message_id, text, status)
+
+
+def update_message(message_id: str, text: str, status: str) -> None:
+    """Persist a message and wait until this write, and earlier ones, commit."""
+    _persister.submit(message_id, text, status)
+    _persister.flush()
 
 
 def get_message(message_id: str) -> ChatMessage | None:

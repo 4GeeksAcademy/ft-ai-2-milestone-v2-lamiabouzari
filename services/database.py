@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
-from sqlalchemy.pool import NullPool
 from sqlmodel import Session, SQLModel, create_engine
 from tinydb import TinyDB
 from tinydb.table import Document
@@ -184,10 +183,16 @@ def get_inventory_engine():
             if settings.database_url.startswith("postgresql")
             else {}
         )
+        # Direct Postgres (not the transaction pooler) can keep a small pool.
+        # pre_ping drops connections Supabase has already closed; recycle
+        # avoids using one past the server's idle timeout.
         _inventory_engine = create_engine(
             settings.database_url,
             echo=False,
-            poolclass=NullPool,
+            pool_pre_ping=True,
+            pool_size=5,
+            max_overflow=5,
+            pool_recycle=280,
             connect_args=connect_args,
         )
     return _inventory_engine

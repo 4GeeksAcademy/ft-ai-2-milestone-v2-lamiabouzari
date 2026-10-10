@@ -107,25 +107,27 @@ async def chat_socket(websocket: WebSocket, session_id: str) -> None:
         await _reject(websocket, CLOSE_UNAUTHORIZED)
         return
 
-    session = store.get_session(session_id)
+    # Accept as soon as the JWT is valid. Session lookup hits Postgres and must
+    # not block the event loop, or the browser never leaves "Connecting…".
+    await websocket.accept()
+    session = await asyncio.to_thread(store.get_session, session_id)
     if session is None or session.agent_id != AGENT_ID:
-        await _reject(websocket, CLOSE_NOT_FOUND)
+        await websocket.close(code=CLOSE_NOT_FOUND)
         return
     if session.user_id != str(user.id):
-        await _reject(websocket, CLOSE_FORBIDDEN)
+        await websocket.close(code=CLOSE_FORBIDDEN)
         return
 
     requested_thread = websocket.query_params.get("thread_id")
     if requested_thread and requested_thread != session_id:
-        await _reject(websocket, CLOSE_NOT_FOUND)
+        await websocket.close(code=CLOSE_NOT_FOUND)
         return
 
-    await websocket.accept()
     subscription_id, queue = bus.subscribe(session_id)
     sender: asyncio.Task | None = None
     receiver: asyncio.Task | None = None
     try:
-        frame = snapshot(session_id)
+        frame = await asyncio.to_thread(snapshot, session_id)
         await websocket.send_json(frame)
         sender = asyncio.create_task(_forward(websocket, queue, _snapshot_sequence(frame)))
         receiver = asyncio.create_task(_receive(websocket, session_id))

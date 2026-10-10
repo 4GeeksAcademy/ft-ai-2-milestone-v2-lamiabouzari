@@ -36,6 +36,12 @@ export interface GenerationCompleted {
   message_id: string;
 }
 
+export interface GenerationFailed {
+  session_id: string;
+  message_id: string;
+  message: string;
+}
+
 export interface UserMessageEvent {
   session_id: string;
   message_id: string;
@@ -50,7 +56,8 @@ interface ChatHandlers {
   onToken: (chunk: TokenChunk) => void;
   onInterrupted: (event: GenerationInterrupted) => void;
   onCompleted: (event: GenerationCompleted) => void;
-  onConnectionChange?: (state: ConnectionState) => void;
+  onFailed: (event: GenerationFailed) => void;
+  onConnectionChange?: (state: ConnectionState, code?: number) => void;
 }
 
 export function nextBackoffMs(attempt: number): number {
@@ -124,12 +131,14 @@ export function startCxChat(sessionId: string, token: string, handlers: ChatHand
         handlers.onInterrupted(data as GenerationInterrupted);
       } else if (payload.event === "generation_completed") {
         handlers.onCompleted(data as GenerationCompleted);
+      } else if (payload.event === "generation_failed") {
+        handlers.onFailed(data as GenerationFailed);
       }
     };
     current.onclose = (event) => {
       if (stopped || socket !== current) return;
       if (event.code === 4401 || event.code === 4403 || event.code === 4404) {
-        handlers.onConnectionChange?.("closed");
+        handlers.onConnectionChange?.("closed", event.code);
         return;
       }
       handlers.onConnectionChange?.("reconnecting");
@@ -162,6 +171,24 @@ export function readStoredSessionId(): string | null {
 export function storeSessionId(sessionId: string): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem("trackflow_cx_session_id", sessionId);
+}
+
+export function clearStoredSessionId(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem("trackflow_cx_session_id");
+}
+
+/** True when the JWT exp claim is missing or already past. Does not check the signature. */
+export function accessTokenExpired(token: string, nowMs = Date.now()): boolean {
+  const segment = token.split(".")[1];
+  if (!segment) return true;
+  try {
+    const padded = segment.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (segment.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded)) as { exp?: unknown };
+    return typeof payload.exp !== "number" || payload.exp * 1000 <= nowMs;
+  } catch {
+    return true;
+  }
 }
 
 export function currentAccessToken(): string | null {

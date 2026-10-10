@@ -6,6 +6,8 @@ import { StateMessage } from "@/components/ui/StateMessage";
 import { ApiError } from "@/lib/api-client";
 import {
   getWeeklyWarehouseClientPerformance,
+  type PipelineRunSummary,
+  type SourceGap,
   type WeeklyPerformanceEntry,
 } from "@/lib/reporting";
 
@@ -17,9 +19,28 @@ export default function ReportingPage() {
   );
 }
 
+function zeroRowDescription(
+  run: PipelineRunSummary,
+  gap: SourceGap | undefined
+): string {
+  const processed = `${run.records_processed} KPI ${run.records_processed === 1 ? "row" : "rows"}`;
+  if (!gap || gap.source_events === 0) {
+    return `The recorded run for ${run.week_start} completed with ${processed}. That week has no inbound, outbound, stockout, or discrepancy events.`;
+  }
+  if (gap.missing_client_id === gap.source_events && gap.missing_warehouse === 0) {
+    return `The recorded run for ${run.week_start} completed with ${processed}. It read ${gap.source_events} source events. Each event includes a warehouse, and none includes client_id, so the pipeline cannot group them into a warehouse and client row.`;
+  }
+  return `The recorded run for ${run.week_start} completed with ${processed}. Of ${gap.source_events} source events, ${gap.missing_client_id} are missing client_id and ${gap.missing_warehouse} are missing a warehouse.`;
+}
+
 function ReportingPageContent() {
   const [entries, setEntries] = useState<WeeklyPerformanceEntry[]>([]);
   const [weekStart, setWeekStart] = useState<string | null>(null);
+  const [reportState, setReportState] = useState<
+    "never_run" | "completed_without_rows" | "ready"
+  >("never_run");
+  const [pipelineRun, setPipelineRun] = useState<PipelineRunSummary | null>(null);
+  const [sourceGap, setSourceGap] = useState<SourceGap | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -28,6 +49,9 @@ function ReportingPageContent() {
       .then((response) => {
         setWeekStart(response.week_start);
         setEntries(response.entries);
+        setReportState(response.report_state);
+        setPipelineRun(response.pipeline_run ?? null);
+        setSourceGap(response.source_gap ?? null);
       })
       .catch((error) => {
         setLoadError(
@@ -68,11 +92,17 @@ function ReportingPageContent() {
               title="Could not load weekly performance"
               description={loadError}
             />
+          ) : reportState === "completed_without_rows" && pipelineRun ? (
+            <StateMessage
+              tone="empty"
+              title="The weekly pipeline completed with no valid rows."
+              description={zeroRowDescription(pipelineRun, sourceGap ?? undefined)}
+            />
           ) : entries.length === 0 ? (
             <StateMessage
               tone="empty"
               title="No weekly performance reported yet."
-              description="Run the weekly reporting pipeline to populate this view."
+              description="The weekly pipeline has not been run."
             />
           ) : (
             <div className="overflow-x-auto">

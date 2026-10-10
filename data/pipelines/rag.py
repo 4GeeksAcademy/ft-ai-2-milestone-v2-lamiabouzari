@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from data.process.rag import COLLECTION_NAME, embed
+from data.process.rag import active_collection, embed, openai_client
 
 # Cosine similarity scores are provider/model dependent. This conservative
 # default is documented in docs/rag/rag-design.md and may be overridden via env.
@@ -64,9 +65,13 @@ def _has_affirmative_promise(answer: str) -> bool:
     without_negations = re.sub(
         r"\b(?:no\s+(?:delivery\s+)?guarantee|"
         r"(?:there\s+)?(?:is|are|was|were)\s+no\s+(?:delivery\s+)?guarantee|"
-        r"(?:not|never|isn['’]?t|aren['’]?t)\s+(?:be\s+)?(?:guaranteed?|promised|assured)|"
+        r"(?:not|never|isn['’]?t|aren['’]?t)\s+(?:be\s+)?(?:guaranteed?|promis(?:e|ed|es)|assured?)|"
         r"(?:cannot|can['’]?t|can\s+not|do\s+not|don['’]?t|does\s+not|"
-        r"doesn['’]?t|will\s+not|won['’]?t)\s+(?:guarantee|promise|assure))\b",
+        r"doesn['’]?t|will\s+not|won['’]?t|must\s+not)\s+(?:guarantee|promise|assure)|"
+        r"(?:will\s+not|won['’]?t)\s+(?:be\s+)?(?:a\s+)?"
+        r"(?:guaranteed?|promis(?:e|ed|es)|assured?)|"
+        r"(?:not|never)\s+(?:\w+\s+){1,8}as\s+(?:guaranteed|promised|assured)|"
+        r"guarantee\b(?:[^.]{0,160}?)is\s+not\s+documented)\b",
         " ",
         answer,
         flags=re.IGNORECASE,
@@ -84,9 +89,13 @@ def _has_affirmative_promise(answer: str) -> bool:
 def _has_affirmative_automatic_return(answer: str) -> bool:
     """Detect automatic-return claims while preserving explicit negatives."""
     negative = re.compile(
-        r"\b(?:not|never|isn['’]?t|aren['’]?t|cannot|can['’]?t|do not|don['’]?t)"
+        r"\b(?:not|never|isn['’]?t|aren['’]?t|cannot|can['’]?t|do not|don['’]?t|must\s+not)"
         r"\s+(?:be\s+)?automatic(?:ally)?\b"
-        r"|\bnot\s+automatically\s+approved\b",
+        r"|\bnot\s+automatically\s+approved\b"
+        r"|\b(?:not|never|must\s+not)\s+(?:\w+\s+){1,12}as\s+automatically"
+        r"(?:\s+\w+)?(?:(?:,(?:\s+or)?|\s+or)\s+automatically(?:\s+\w+)?){0,4}\b"
+        r"|\b(?:does\s+not|do\s+not|don['’]?t|doesn['’]?t|not)\s+"
+        r"(?:document|describe|include|contain|state)\s+(?:\w+\s+){0,16}automatic(?:ally)?\b",
         re.IGNORECASE,
     )
     without_negations = negative.sub(" ", answer)
@@ -129,35 +138,67 @@ def _apply_business_safeguards(
     return answer
 
 
+_qdrant_client = None
+_qdrant_lock = threading.Lock()
+
+
+def _qdrant():
+    """Return one Qdrant client so retrieval reuses its HTTP connection."""
+    global _qdrant_client
+    if _qdrant_client is None:
+        with _qdrant_lock:
+            if _qdrant_client is None:
+                from qdrant_client import QdrantClient
+
+                url = os.getenv("QDRANT_URL", "http://localhost:6333")
+                api_key = os.getenv("QDRANT_API_KEY")
+                _qdrant_client = QdrantClient(url=url, api_key=api_key) if api_key else QdrantClient(url=url)
+    return _qdrant_client
+
+
 def retrieve(query: str, *, k: int = 5, min_score: float = DEFAULT_MIN_SCORE) -> list[dict[str, Any]]:
     """Return up to ``k`` relevant payloads; an empty/short result is normal."""
     if not query.strip() or k <= 0:
         return []
 
-    from qdrant_client import QdrantClient, models
+    from qdrant_client import models
 
-    url = os.getenv("QDRANT_URL", "http://localhost:6333")
-    api_key = os.getenv("QDRANT_API_KEY")
-    client = QdrantClient(url=url, api_key=api_key) if api_key else QdrantClient(url=url)
-    try:
-        response = client.query_points(
-            collection_name=COLLECTION_NAME,
-            query=embed(query),
-            limit=k,
-            query_filter=models.Filter(
-                must=[models.FieldCondition(key="company", match=models.MatchValue(value="trackflow"))]
-            ),
-            with_payload=True,
-            with_vectors=False,
-            score_threshold=min_score,
-        )
-        return [
-            dict(point.payload)
-            for point in response.points
-            if point.payload is not None and point.score >= min_score
-        ]
-    finally:
-        client.close()
+    response = _qdrant().query_points(
+        collection_name=active_collection(),
+        query=embed(query),
+        limit=k,
+        query_filter=models.Filter(
+            must=[models.FieldCondition(key="company", match=models.MatchValue(value="trackflow"))]
+        ),
+        with_payload=True,
+        with_vectors=False,
+        score_threshold=min_score,
+    )
+    return [
+        dict(point.payload)
+        for point in response.points
+        if point.payload is not None and point.score >= min_score
+    ]
+
+
+def _provider_configured() -> bool:
+    return bool(os.getenv("OPENAI_API_KEY"))
+
+
+def _excerpts(context: list[dict[str, Any]]) -> str:
+    return "\n\n".join(
+        str(item.get("text") or "").strip()
+        for item in context
+        if str(item.get("text") or "").strip()
+    )
+
+
+def _grounded_from_context(question: str, context: list[dict[str, Any]]) -> str:
+    """Answer from retrieved source text when the generation provider is unset."""
+    excerpts = _excerpts(context)
+    if not excerpts:
+        return SAFE_REFUSAL
+    return _apply_business_safeguards(question, excerpts, context)
 
 
 def generate_answer(question: str, context: list[dict[str, Any]]) -> str:
@@ -167,8 +208,8 @@ def generate_answer(question: str, context: list[dict[str, Any]]) -> str:
             "I’m sorry, but I don’t have enough confirmed information in the "
             "TrackFlow materials available to answer that. I can check with our team."
         )
-
-    from openai import OpenAI
+    if not _provider_configured():
+        return _grounded_from_context(question, context)
 
     model = os.getenv("RAG_GENERATION_MODEL", "downtown-miami/openrouter/openai/gpt-6-luna")
     embedding_model = os.getenv(
@@ -205,11 +246,7 @@ Keep the response concise, client-friendly, and limited to what the excerpts sup
         f"<untrusted_excerpts>\n{excerpts}\n</untrusted_excerpts>\n\n"
         f"Client question: {question}"
     )
-    client = OpenAI(
-        api_key=os.environ["OPENAI_API_KEY"],
-        base_url=os.getenv("OPENAI_BASE_URL") or None,
-    )
-    response = client.chat.completions.create(
+    response = openai_client().chat.completions.create(
         model=model,
         temperature=0,
         messages=[
@@ -230,7 +267,11 @@ def iter_model_deltas(question: str, context: list[dict[str, Any]]):
     """
     if not context:
         return
-    from openai import OpenAI
+    if not _provider_configured():
+        answer = _grounded_from_context(question, context)
+        if answer:
+            yield answer
+        return
 
     model = os.getenv("RAG_GENERATION_MODEL", "downtown-miami/openrouter/openai/gpt-6-luna")
     excerpts = "\n\n".join(
@@ -256,11 +297,7 @@ Keep the response concise, client-friendly, and limited to what the excerpts sup
         f"<untrusted_excerpts>\n{excerpts}\n</untrusted_excerpts>\n\n"
         f"Client question: {question}"
     )
-    client = OpenAI(
-        api_key=os.environ["OPENAI_API_KEY"],
-        base_url=os.getenv("OPENAI_BASE_URL") or None,
-    )
-    stream = client.chat.completions.create(
+    stream = openai_client().chat.completions.create(
         model=model,
         temperature=0,
         stream=True,

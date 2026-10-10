@@ -8,7 +8,7 @@ from sqlmodel import Field, SQLModel
 
 AGENT_ID = "first_line_cx"
 SESSION_STATUSES = ("active", "interrupted", "closed")
-MESSAGE_STATUSES = ("generating", "complete", "interrupted")
+MESSAGE_STATUSES = ("generating", "complete", "interrupted", "failed")
 
 
 def _now() -> datetime:

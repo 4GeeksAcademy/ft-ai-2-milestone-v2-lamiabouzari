@@ -43,6 +43,7 @@ def _client_with_results(monkeypatch, points: list[Any]):
         {"Filter": Filter, "FieldCondition": FieldCondition, "MatchValue": MatchValue},
     )
     monkeypatch.setitem(sys.modules, "qdrant_client", qdrant)
+    monkeypatch.setattr(rag, "_qdrant_client", None)
     monkeypatch.setattr(rag, "embed", lambda _text: [0.1, 0.2])
     return fake
 
@@ -190,6 +191,8 @@ def test_delivery_promise_negations_are_not_affirmative():
         "We cannot guarantee delivery during Black Friday.",
         "We can't guarantee delivery during Black Friday.",
         "We won't guarantee delivery during Black Friday.",
+        "No. We can’t guarantee delivery during Black Friday, but any estimate won’t be a guaranteed delivery commitment.",
+        "A service availability guarantee is not documented in the knowledge base.",
     )
     for answer in safe_answers:
         assert rag._has_affirmative_promise(answer) is False

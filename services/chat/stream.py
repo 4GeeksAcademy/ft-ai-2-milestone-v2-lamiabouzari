@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -12,6 +13,10 @@ from chat.bus import bus
 from data.pipelines.support_agent import bind_token_stream, run_support_agent, unbind_token_stream
 from model_input import ModelInputError, normalize_model_question
 from models.chat import AGENT_ID
+
+logger = logging.getLogger(__name__)
+
+_GENERATION_FAILED = "The support agent could not complete this request. Please try again later."
 
 _runtime_lock = threading.Lock()
 
@@ -92,7 +97,7 @@ def publish_token(generation: Generation, token: str) -> None:
         text = generation.text
         message_id = generation.message_id
         session_id = generation.session_id
-        store.update_message(message_id, text, "generating")
+        store.queue_message_update(message_id, text, "generating")
         bus.publish(
             session_id,
             "token_chunk",
@@ -135,6 +140,26 @@ def _settle_interrupted(generation: Generation) -> bool:
     return True
 
 
+def _settle_failed(generation: Generation) -> None:
+    """Stop a generation that raised and publish a safe message the client can show."""
+    current = runtime(generation.session_id)
+    with current.lock:
+        if generation.settled:
+            return
+        generation.settled = True
+        generation.cancel.set()
+        if current.active is generation:
+            current.active = None
+        message_id = generation.message_id
+        session_id = generation.session_id
+    store.update_message(message_id, _GENERATION_FAILED, "failed")
+    bus.publish(
+        session_id,
+        "generation_failed",
+        {"session_id": session_id, "message_id": message_id, "message": _GENERATION_FAILED},
+    )
+
+
 def _settle_completed(generation: Generation, result: dict | None) -> None:
     final = str((result or {}).get("answer") or "")
     current = runtime(generation.session_id)
@@ -171,6 +196,17 @@ async def _produce(generation: Generation, question: str) -> None:
     except asyncio.CancelledError:
         _settle_interrupted(generation)
         raise
+    except Exception as exc:
+        logger.error(
+            "support generation failed session=%s error_type=%s",
+            generation.session_id,
+            type(exc).__name__,
+        )
+        if generation.cancel.is_set():
+            _settle_interrupted(generation)
+            return
+        _settle_failed(generation)
+        return
     if generation.cancel.is_set():
         _settle_interrupted(generation)
         return

@@ -3,12 +3,16 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { ApiError, apiRequest } from "@/lib/api-client";
+import { clearToken, useIsAuthenticated } from "@/lib/auth";
 import {
   acceptTokenSequence,
+  accessTokenExpired,
   appliedSnapshotSequence,
   ChatMessageView,
+  clearStoredSessionId,
   ConnectionState,
   GenerationCompleted,
+  GenerationFailed,
   GenerationInterrupted,
   SessionSnapshot,
   TokenChunk,
@@ -39,12 +43,19 @@ function SupportChat() {
   const [draft, setDraft] = useState("");
   const [connection, setConnection] = useState<ConnectionState | "connecting">("connecting");
   const [error, setError] = useState<string | null>(null);
+  const [sessionAttempt, setSessionAttempt] = useState(0);
   const sendRef = useRef<((event: string, data: Record<string, string>) => void) | null>(null);
   const seenSequence = useRef(0);
+  const sessionRetry = useRef(false);
+  const authenticated = useIsAuthenticated();
 
   useEffect(() => {
     const token = currentAccessToken();
-    if (!token) return undefined;
+    if (!authenticated || !token) return undefined;
+    if (accessTokenExpired(token)) {
+      clearToken();
+      return undefined;
+    }
     let stopped = false;
     let chatHandle: { stop: () => void; send: (event: string, data: Record<string, string>) => void } | null = null;
 
@@ -65,13 +76,32 @@ function SupportChat() {
         if (stopped || !id) return;
         setSessionId(id);
         chatHandle = startCxChat(id, token, {
-          onConnectionChange: (state: ConnectionState) => setConnection(state),
+          onConnectionChange: (state: ConnectionState, code?: number) => {
+            if (code === 4401) {
+              setConnection("closed");
+              setError("Your sign-in expired. Sign in again to use the chat.");
+              clearToken();
+              return;
+            }
+            if ((code === 4403 || code === 4404) && !sessionRetry.current) {
+              sessionRetry.current = true;
+              clearStoredSessionId();
+              setConnection("connecting");
+              setSessionAttempt((attempt) => attempt + 1);
+              return;
+            }
+            if (code === 4403 || code === 4404) {
+              setError("The support chat could not open a session.");
+            }
+            setConnection(state);
+          },
           onSnapshot: (snapshot: SessionSnapshot) => {
             seenSequence.current = appliedSnapshotSequence(snapshot.messages);
             setSessionId(snapshot.session_id);
             setMessages(snapshot.messages);
           },
           onUserMessage: (message: UserMessageEvent) => {
+            seenSequence.current = 0;
             setMessages((current) => {
               if (current.some((item) => item.message_id === message.message_id)) return current;
               return [
@@ -115,12 +145,30 @@ function SupportChat() {
             });
           },
           onCompleted: (event: GenerationCompleted) => {
+            setError(null);
             setMessages((current) => {
               const next = current.map((item) => ({ ...item }));
               const matched = next.findIndex((item) => item.message_id === event.message_id);
               const index = matched >= 0 ? matched : lastGeneratingIndex(next);
               if (index < 0) return current;
               next[index] = { ...next[index], message_id: event.message_id, status: "complete" };
+              return next;
+            });
+          },
+          onFailed: (event: GenerationFailed) => {
+            setError(event.message);
+            setMessages((current) => {
+              const next = current.map((item) => ({ ...item }));
+              const matched = next.findIndex((item) => item.message_id === event.message_id);
+              const index = matched >= 0 ? matched : lastGeneratingIndex(next);
+              const failed: ChatMessageView = {
+                message_id: event.message_id,
+                role: "assistant",
+                text: event.message,
+                status: "failed",
+              };
+              if (index < 0) return [...next, failed];
+              next[index] = { ...next[index], ...failed };
               return next;
             });
           },
@@ -141,7 +189,7 @@ function SupportChat() {
       sendRef.current = null;
       chatHandle?.stop();
     };
-  }, []);
+  }, [authenticated, sessionAttempt]);
 
   const generating = messages.some((message) => message.role === "assistant" && message.status === "generating");
 
@@ -149,6 +197,7 @@ function SupportChat() {
     event.preventDefault();
     const text = draft.trim();
     if (!text || !sessionId || !sendRef.current) return;
+    setError(null);
     if (generating) {
       sendRef.current("interrupt_requested", { session_id: sessionId, new_input: text });
     } else {
@@ -174,7 +223,13 @@ function SupportChat() {
           another question, or Stop, interrupts the current answer and keeps that partial reply.
         </p>
         <p className="mt-3 text-xs text-slate-600" role="status">
-          {connection === "open" ? "Connected" : connection === "reconnecting" ? "Reconnecting…" : "Connecting…"}
+          {connection === "open"
+            ? "Connected"
+            : connection === "reconnecting"
+              ? "Reconnecting…"
+              : connection === "closed"
+                ? "Not connected"
+                : "Connecting…"}
         </p>
 
         <div className="mt-6 space-y-3" aria-live="polite">
@@ -186,14 +241,15 @@ function SupportChat() {
           {messages.map((message, index) => (
             <article
               key={message.message_id || `${message.role}-${index}`}
-              className="rounded-xl border border-line bg-panel p-4"
+              className="rounded-xl border border-line bg-panel p-4 dark:border-slate-600 dark:bg-slate-900"
             >
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                 {message.role === "user" ? "You" : "TrackFlow"}
                 {message.status === "interrupted" ? " · Interrupted" : ""}
                 {message.status === "generating" ? " · Writing" : ""}
+                {message.status === "failed" ? " · Failed" : ""}
               </p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-800 dark:text-slate-100">
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-foreground dark:text-slate-100">
                 {message.text}
               </p>
             </article>
