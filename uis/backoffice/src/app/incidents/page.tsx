@@ -124,9 +124,32 @@ function IncidentManager() {
     }
   }
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    const query = new URLSearchParams(
+      [
+        ["status", filters.status],
+        ["origin", filters.origin],
+        ["branch", filters.branch],
+      ].filter(([, value]) => value)
+    );
+    Promise.all([request(`?${query}`), request("/summary")])
+      .then(([listed, totals]) => {
+        if (cancelled) return;
+        setItems(listed as unknown as Incident[]);
+        setSummary(totals as unknown as Summary);
+        setError("");
+      })
+      .catch((caught: unknown) => {
+        if (cancelled) return;
+        setError(caught instanceof Error ? caught.message : "Unable to load incidents");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [filters.status, filters.origin, filters.branch]);
 
   async function create(event: FormEvent) {
@@ -242,7 +265,10 @@ function IncidentManager() {
             <select
               key={key}
               value={filters[key]}
-              onChange={(event) => setFilters({ ...filters, [key]: event.target.value })}
+              onChange={(event) => {
+                setLoading(true);
+                setFilters({ ...filters, [key]: event.target.value });
+              }}
               className="rounded-lg border border-line p-2"
             >
               <option value="">All {key}s</option>

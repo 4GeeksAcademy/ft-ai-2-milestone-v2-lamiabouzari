@@ -192,9 +192,15 @@ function RfpIntakeContent() {
   useEffect(() => {
     if (!stillAnalyzing) return undefined;
     const timer = window.setInterval(() => {
-      refresh().catch(() => {
-        // Keep the last successful list while a refresh fails.
-      });
+      void apiRequest<RfpTicket[]>("/rfp/tickets", { auth: true, cache: "no-store" })
+        .then((rows) => {
+          ticketsRef.current = rows;
+          setTickets(rows);
+          setListError(null);
+        })
+        .catch(() => {
+          // Keep the last successful list while a refresh fails.
+        });
     }, 2000);
     return () => window.clearInterval(timer);
   }, [stillAnalyzing]);
