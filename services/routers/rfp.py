@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from data.pipelines.rfp_approval.decisions import ApprovalError
@@ -57,7 +57,8 @@ async def upload_rfp(
 
 
 @router.get("/tickets")
-def get_tickets(_user: UserPublic = Depends(get_current_user)) -> list[dict]:
+def get_tickets(response: Response, _user: UserPublic = Depends(get_current_user)) -> list[dict]:
+    response.headers["Cache-Control"] = "no-store"
     _ensure_store()
     snapshots = []
     for ticket in list_tickets():
@@ -68,7 +69,8 @@ def get_tickets(_user: UserPublic = Depends(get_current_user)) -> list[dict]:
 
 
 @router.get("/tickets/{ticket_id}")
-def get_ticket(ticket_id: str, _user: UserPublic = Depends(get_current_user)) -> dict:
+def get_ticket(ticket_id: str, response: Response, _user: UserPublic = Depends(get_current_user)) -> dict:
+    response.headers["Cache-Control"] = "no-store"
     _ensure_store()
     snapshot = ticket_snapshot(ticket_id)
     if snapshot is None:
