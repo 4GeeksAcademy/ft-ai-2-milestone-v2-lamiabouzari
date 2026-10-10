@@ -47,6 +47,7 @@ function SupportChat() {
   const sendRef = useRef<((event: string, data: Record<string, string>) => void) | null>(null);
   const seenSequence = useRef(0);
   const sessionRetry = useRef(false);
+  const conversationGeneration = useRef(0);
   const authenticated = useIsAuthenticated();
 
   useEffect(() => {
@@ -56,8 +57,10 @@ function SupportChat() {
       clearToken();
       return undefined;
     }
+    const generation = conversationGeneration.current;
     let stopped = false;
     let chatHandle: { stop: () => void; send: (event: string, data: Record<string, string>) => void } | null = null;
+    const stillCurrent = () => conversationGeneration.current === generation;
 
     async function openSession(): Promise<string | null> {
       const existing = readStoredSessionId();
@@ -67,16 +70,18 @@ function SupportChat() {
         auth: true,
         body: { client_id: "backoffice" },
       });
+      if (!stillCurrent()) return null;
       storeSessionId(created.session_id);
       return created.session_id;
     }
 
     openSession()
       .then((id) => {
-        if (stopped || !id) return;
+        if (stopped || !id || !stillCurrent()) return;
         setSessionId(id);
         chatHandle = startCxChat(id, token, {
           onConnectionChange: (state: ConnectionState, code?: number) => {
+            if (!stillCurrent()) return;
             if (code === 4401) {
               setConnection("closed");
               setError("Your sign-in expired. Sign in again to use the chat.");
@@ -96,11 +101,13 @@ function SupportChat() {
             setConnection(state);
           },
           onSnapshot: (snapshot: SessionSnapshot) => {
+            if (!stillCurrent()) return;
             seenSequence.current = appliedSnapshotSequence(snapshot.messages);
             setSessionId(snapshot.session_id);
             setMessages(snapshot.messages);
           },
           onUserMessage: (message: UserMessageEvent) => {
+            if (!stillCurrent()) return;
             seenSequence.current = 0;
             setMessages((current) => {
               if (current.some((item) => item.message_id === message.message_id)) return current;
@@ -116,6 +123,7 @@ function SupportChat() {
             });
           },
           onToken: (chunk: TokenChunk) => {
+            if (!stillCurrent()) return;
             if (!acceptTokenSequence(seenSequence.current, chunk.sequence)) return;
             seenSequence.current = chunk.sequence;
             setMessages((current) => {
@@ -135,6 +143,7 @@ function SupportChat() {
             });
           },
           onInterrupted: (event: GenerationInterrupted) => {
+            if (!stillCurrent()) return;
             setMessages((current) => {
               const next = current.map((item) => ({ ...item }));
               const matched = next.findIndex((item) => item.message_id === event.message_id);
@@ -145,6 +154,7 @@ function SupportChat() {
             });
           },
           onCompleted: (event: GenerationCompleted) => {
+            if (!stillCurrent()) return;
             setError(null);
             setMessages((current) => {
               const next = current.map((item) => ({ ...item }));
@@ -156,6 +166,7 @@ function SupportChat() {
             });
           },
           onFailed: (event: GenerationFailed) => {
+            if (!stillCurrent()) return;
             setError(event.message);
             setMessages((current) => {
               const next = current.map((item) => ({ ...item }));
@@ -180,6 +191,7 @@ function SupportChat() {
         sendRef.current = chatHandle.send;
       })
       .catch((requestError: unknown) => {
+        if (!stillCurrent()) return;
         setError(requestError instanceof ApiError ? requestError.message : "The support chat could not start.");
         setConnection("closed");
       });
@@ -211,13 +223,38 @@ function SupportChat() {
     sendRef.current("interrupt_requested", { session_id: sessionId, new_input: "" });
   }
 
+  function startNewConversation() {
+    conversationGeneration.current += 1;
+    clearStoredSessionId();
+    seenSequence.current = 0;
+    sessionRetry.current = false;
+    setSessionId(null);
+    setMessages([]);
+    setDraft("");
+    setError(null);
+    setConnection("connecting");
+    setSessionAttempt((attempt) => attempt + 1);
+  }
+
   return (
     <section className="space-y-6">
       <div className="dashboard-card p-6 sm:p-8">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent-strong">
-          TrackFlow account support
-        </p>
-        <h2 className="mt-1 font-display text-2xl text-foreground">First-line CX</h2>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent-strong">
+              TrackFlow account support
+            </p>
+            <h2 className="mt-1 font-display text-2xl text-foreground">First-line CX</h2>
+          </div>
+          <button
+            type="button"
+            onClick={startNewConversation}
+            disabled={connection === "connecting"}
+            className="rounded-full border border-line px-5 py-2.5 text-sm font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            New conversation
+          </button>
+        </div>
         <p className="mt-2 max-w-2xl text-sm text-slate-700">
           Ask about tracking, returns, and delivery. The answer appears as it is generated. Sending
           another question, or Stop, interrupts the current answer and keeps that partial reply.
