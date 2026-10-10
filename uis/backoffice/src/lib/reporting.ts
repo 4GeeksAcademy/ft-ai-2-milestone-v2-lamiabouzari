@@ -10,9 +10,25 @@ export interface WeeklyPerformanceEntry {
   discrepancy_rate: number;
 }
 
-interface WeeklyPerformanceResponse {
+export interface PipelineRunSummary {
+  status: string;
+  records_processed: number;
+  week_start: string;
+  week_end: string;
+}
+
+export interface SourceGap {
+  source_events: number;
+  missing_client_id: number;
+  missing_warehouse: number;
+}
+
+export interface WeeklyPerformanceResponse {
   week_start: string | null;
   entries: WeeklyPerformanceEntry[];
+  report_state: "never_run" | "completed_without_rows" | "ready";
+  pipeline_run?: PipelineRunSummary;
+  source_gap?: SourceGap;
 }
 
 export function getWeeklyWarehouseClientPerformance(): Promise<WeeklyPerformanceResponse> {
