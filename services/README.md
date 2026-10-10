@@ -8,3 +8,24 @@ Each subfolder inside `services/` must correspond to **one specific service** (f
 - **Recommendation**: document in this file (or in sub-READMEs) the services you add, their objective, the technology used, and how to run them.
 
 > _Spanish version: [README.es.md](./README.es.md)._
+
+## Supplier directory
+
+The supplier API is not a second server. `services/api` is mounted on the FastAPI app in `services/main.py` (http://127.0.0.1:8000). Supplier rows are stored only in the TinyDB table `suppliers`.
+
+From this directory, the seed dependencies are declared in `pyproject.toml`. The project is unmanaged (`tool.uv.managed = false`) so `uv sync` must not be run: it would replace `services/.venv`.
+
+Install the entry point into the existing application virtualenv, then seed:
+
+```text
+.\.venv\Scripts\python.exe -m pip install -e . --no-deps
+uv run seed
+```
+
+A clean virtualenv can run it with the declared dependencies instead of `--no-deps`:
+
+```text
+uv venv <clean-venv> --python 3.12
+uv pip install -e . --python <clean-venv>\Scripts\python.exe
+uv run --python <clean-venv>\Scripts\python.exe seed
+```

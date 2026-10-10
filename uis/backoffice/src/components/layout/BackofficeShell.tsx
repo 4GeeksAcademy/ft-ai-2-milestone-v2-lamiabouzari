@@ -17,6 +17,7 @@ const NAV_LINKS = [
   { href: "/incidents", label: "Incident Analysis" },
   { href: "/knowledge", label: "Knowledge Base" },
   { href: "/rfp", label: "RFP Intake" },
+  { href: "/suppliers", label: "Suppliers" },
 ];
 
 export function BackofficeShell({ children }: BackofficeShellProps) {

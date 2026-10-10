@@ -102,6 +102,18 @@ def app_exception_handler(request, exc: AppException) -> JSONResponse:
     )
 
 
+def _validation_detail(request: Request, exc: RequestValidationError) -> str:
+    """Supplier routes name the failing field. Other routes stay generic."""
+    if not request.url.path.startswith("/suppliers"):
+        return "Invalid request data."
+    parts: list[str] = []
+    for error in exc.errors():
+        location = [str(item) for item in error.get("loc", []) if item != "body"]
+        field = ".".join(location) if location else "request"
+        parts.append(f"{field}: {error.get('msg', 'Invalid value')}")
+    return "; ".join(parts) if parts else "Invalid request data."
+
+
 def request_validation_exception_handler(
     request: Request,
     exc: RequestValidationError,
@@ -115,7 +127,7 @@ def request_validation_exception_handler(
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
-            "detail": "Invalid request data.",
+            "detail": _validation_detail(request, exc),
             "error_code": ERROR_CODES["VALIDATION_ERROR"],
         },
     )

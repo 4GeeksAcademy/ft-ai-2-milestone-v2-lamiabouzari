@@ -11,10 +11,15 @@ uis/backoffice/.next/
 __pycache__/
 *.py[cod]
 
-# Local runtime data
+# Local environments and runtime data
+services/.venv/
+*.egg-info/
 backups/
 data/db.json
 services/data/db.json
 data/agent_memory/
 data/raw/rfp/*
 !data/raw/rfp/.gitkeep
+data/raw/*.pdf
+.qdrant-initialized
+services/.qdrant-initialized
