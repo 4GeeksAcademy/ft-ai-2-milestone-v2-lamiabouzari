@@ -1,6 +1,6 @@
 # RFP intake
 
-TrackFlow Sales uploads one client PDF in the backoffice. The existing FastAPI service stores the file under `data/raw/rfp/` and inserts one SQLModel ticket with status `analyzing`. Intake then runs in a background task. The page polls `GET /rfp/tickets`.
+TrackFlow Sales uploads one client PDF in the backoffice. The existing FastAPI service stores the file under `data/raw/rfp/` and inserts one SQLModel ticket with status `analyzing`. Intake then runs in a background task. The page loads `GET /rfp/tickets` when it opens, including after a refresh or a new sign-in, and polls that list while a ticket is still analyzing. The event stream does not replace this saved list.
 
 Part 1 statuses are only `analyzing` → `intake_complete`, or `analyzing` → `discarded`. An unexpected processing error keeps status `analyzing`, sets `intake_failed`, and stores `error_message`. The handoff stays not ready. The backoffice shows that failure and stops treating the ticket as in progress.
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 import csv, io
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile
@@ -13,11 +14,28 @@ from incident_analysis import REQUIRED_FIELDS, AnalysisReport, analyze_incidents
 from models.incident import BRANCHES, CATEGORIES, ORIGINS, STATUSES, Incident, IncidentCreate, IncidentStatusUpdate, IncidentSummary
 from models.user import UserPublic
 router = APIRouter(prefix="/api/incidents", tags=["incidents"])
-_latest_report: AnalysisReport | None = None
+ANALYSIS_TABLE = "incident_analysis_reports"
 TRANSITIONS = {"open": {"in_progress", "discarded"}, "in_progress": {"resolved", "discarded"}, "resolved": set(), "discarded": set()}
 
 def _report_payload(report: AnalysisReport) -> dict[str, Any]:
     return {"total_records": report.total_records, "valid_records": report.valid_records, "invalid_records": report.invalid_records, "invalid_by_reason": report.invalid_by_reason, "category_breakdown": report.category_breakdown, "category_percentages": report.category_percentages, "status_breakdown": report.status_breakdown, "status_percentages": report.status_percentages, "country_breakdown": report.country_breakdown, "country_percentages": report.country_percentages, "closed_scored_incident_count": report.closed_scored_incident_count, "average_satisfaction": report.average_satisfaction, "score_distribution": {str(k): v for k, v in report.score_distribution.items()}}
+
+def _analysis_table():
+    return database.get_db().table(ANALYSIS_TABLE)
+
+def _saved_analysis() -> dict[str, Any] | None:
+    """Return the latest aggregate report, if one has been saved."""
+    saved = _analysis_table().all()
+    return dict(saved[-1]) if saved else None
+
+def _save_analysis(filename: str, report: AnalysisReport) -> dict[str, Any]:
+    """Replace the saved report with aggregates, the file name, and a timestamp."""
+    safe_name = Path(filename or "incidents.csv").name.strip() or "incidents.csv"
+    document = {"filename": safe_name[:200], "analyzed_at": datetime.now(UTC).isoformat(), **_report_payload(report)}
+    table = _analysis_table()
+    table.truncate()
+    table.insert(document)
+    return document
 
 def _parse_csv(contents: bytes) -> list[dict[str, str]]:
     try: text = contents.decode("utf-8-sig")
@@ -63,11 +81,18 @@ def incident_summary(_user: UserPublic = Depends(get_current_user)) -> IncidentS
 @router.post("/analyze")
 async def analyze_incident_file(file: UploadFile, _user: UserPublic = Depends(get_current_user)) -> dict[str, Any]:
     if not (file.filename or "").lower().endswith(".csv"): raise HTTPException(415, "Please upload a CSV file.")
-    global _latest_report; _latest_report = analyze_incidents(_parse_csv(await file.read())); return _report_payload(_latest_report)
+    report = analyze_incidents(_parse_csv(await file.read()))
+    return _save_analysis(file.filename or "incidents.csv", report)
+@router.get("/analysis")
+def latest_incident_analysis(_user: UserPublic = Depends(get_current_user)) -> dict[str, Any]:
+    saved = _saved_analysis()
+    if saved is None: raise HTTPException(404, "No incident analysis is available. Analyze a CSV first.")
+    return saved
 @router.get("/results/export")
 def export_incident_results(_user: UserPublic = Depends(get_current_user)) -> StreamingResponse:
-    if _latest_report is None: raise HTTPException(404, "No incident analysis is available. Analyze a CSV first.")
-    output = io.StringIO(newline=""); writer = csv.writer(output); writer.writerow(["metric", "value", "percentage"]); writer.writerows([["total_records", _latest_report.total_records, ""], ["valid_records", _latest_report.valid_records, ""], ["invalid_records", _latest_report.invalid_records, ""]])
+    saved = _saved_analysis()
+    if saved is None: raise HTTPException(404, "No incident analysis is available. Analyze a CSV first.")
+    output = io.StringIO(newline=""); writer = csv.writer(output); writer.writerow(["metric", "value", "percentage"]); writer.writerows([["total_records", saved["total_records"], ""], ["valid_records", saved["valid_records"], ""], ["invalid_records", saved["invalid_records"], ""]])
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=trackflow-incident-results.csv"})
 
 @router.get("/{incident_id}")

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { isAuthenticated, useIsAuthenticated } from "@/lib/auth";
 
 interface RequireAuthProps {
@@ -14,15 +14,17 @@ interface RequireAuthProps {
  */
 export function RequireAuth({ children }: RequireAuthProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const authenticated = useIsAuthenticated();
 
   useEffect(() => {
     // Read localStorage inside the effect. The first render uses the server
     // snapshot (logged out) and must not send an already signed-in user away.
     if (!isAuthenticated()) {
-      router.replace("/login");
+      const next = pathname && pathname !== "/login" ? `?next=${encodeURIComponent(pathname)}` : "";
+      router.replace(`/login${next}`);
     }
-  }, [authenticated, router]);
+  }, [authenticated, pathname, router]);
 
   if (!authenticated) {
     return (

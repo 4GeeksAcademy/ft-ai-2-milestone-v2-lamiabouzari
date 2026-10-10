@@ -239,11 +239,19 @@ def test_upload_returns_analyzing_then_intake_completes(rfp_db, monkeypatch, tmp
             body = response.json()
             assert body["status"] == "analyzing"
             snapshot = client.get(f"/rfp/tickets/{body['ticket_id']}")
+            listed = client.get("/rfp/tickets")
         assert snapshot.status_code == 200
         payload = snapshot.json()
         assert payload["status"] == "intake_complete"
         assert payload["metadata"]["client_name"] == "Luna Cosmetics"
         assert payload["currency_context"] == "USD"
         assert payload["metadata"]["departments_needed"] == ["warehouse", "lastmile"]
+        assert listed.status_code == 200
+        assert listed.headers["cache-control"] == "no-store"
+        rows = listed.json()
+        assert [row["ticket_id"] for row in rows] == [body["ticket_id"]]
+        assert rows[0]["status"] == "intake_complete"
+        contacts = {section["department_key"]: section["contact"] for section in rows[0]["sections"]}
+        assert contacts == {"warehouse": "Ana Whitfield", "lastmile": "Carlos Vega"}
     finally:
         app.dependency_overrides.clear()

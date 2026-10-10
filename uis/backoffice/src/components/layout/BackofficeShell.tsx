@@ -43,9 +43,6 @@ export function BackofficeShell({ children }: BackofficeShellProps) {
               </h1>
             </div>
             <div className="flex items-center gap-3">
-              <div className="rounded-full bg-accent-soft px-3 py-1 text-xs font-semibold text-accent-strong">
-                Milestone 5
-              </div>
               {authenticated ? (
                 <button
                   type="button"

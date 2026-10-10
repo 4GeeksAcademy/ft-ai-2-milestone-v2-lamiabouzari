@@ -26,13 +26,14 @@ interface ApiRequestOptions {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: unknown;
   auth?: boolean;
+  cache?: RequestCache;
 }
 
 export async function apiRequest<T>(
   path: string,
   options: ApiRequestOptions = {}
 ): Promise<T> {
-  const { method = "GET", body, auth = false } = options;
+  const { method = "GET", body, auth = false, cache } = options;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -49,6 +50,7 @@ export async function apiRequest<T>(
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    cache,
   });
 
   if (!response.ok) {

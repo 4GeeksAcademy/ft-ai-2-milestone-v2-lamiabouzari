@@ -6,6 +6,11 @@ import { ApiError } from "@/lib/api-client";
 import { login } from "@/lib/auth";
 import { StateMessage } from "@/components/ui/StateMessage";
 
+function safeNextPath(value: string | null): string {
+  if (value && /^\/[A-Za-z0-9/_-]*$/.test(value)) return value;
+  return "/products";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -19,7 +24,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login(email, password);
-      router.replace("/products");
+      router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")));
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);

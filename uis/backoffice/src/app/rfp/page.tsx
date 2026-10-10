@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { ApiError, apiRequest, apiUpload } from "@/lib/api-client";
+import { clearToken } from "@/lib/auth";
 import { applyRfpCreated, RfpCreatedEvent, startRfpEventStream } from "@/lib/rfp-events";
 
 interface RfpSection {
@@ -96,6 +97,8 @@ function ticketFromEvent(event: RfpCreatedEvent): RfpTicket {
 function RfpIntakeContent() {
   const [tickets, setTickets] = useState<RfpTicket[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [loadingList, setLoadingList] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [notes, setNotes] = useState<Record<string, { comment: string; changes: string }>>({});
@@ -109,13 +112,41 @@ function RfpIntakeContent() {
   }
 
   async function refresh() {
-    const rows = await apiRequest<RfpTicket[]>("/rfp/tickets", { auth: true });
+    const rows = await apiRequest<RfpTicket[]>("/rfp/tickets", { auth: true, cache: "no-store" });
     replaceTickets(rows);
+    setListError(null);
   }
 
   useEffect(() => {
+    let cancelled = false;
+    apiRequest<RfpTicket[]>("/rfp/tickets", { auth: true, cache: "no-store" })
+      .then((rows) => {
+        if (cancelled) return;
+        if (!Array.isArray(rows)) throw new Error("Ticket list was not a list.");
+        replaceTickets(rows);
+        setListError(null);
+      })
+      .catch((requestError: unknown) => {
+        if (cancelled) return;
+        if (requestError instanceof ApiError && requestError.status === 401) {
+          clearToken();
+          return;
+        }
+        setListError(
+          requestError instanceof ApiError ? requestError.message : "Saved tickets could not be loaded."
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingList(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const stop = startRfpEventStream<RfpTicket>({
-      fetchTickets: () => apiRequest<RfpTicket[]>("/rfp/tickets", { auth: true }),
+      fetchTickets: () => apiRequest<RfpTicket[]>("/rfp/tickets", { auth: true, cache: "no-store" }),
       currentTickets: () => ticketsRef.current,
       onTickets: (next, announced) => {
         replaceTickets(next);
@@ -161,9 +192,15 @@ function RfpIntakeContent() {
   useEffect(() => {
     if (!stillAnalyzing) return undefined;
     const timer = window.setInterval(() => {
-      refresh().catch(() => {
-        // Keep the last successful list while a refresh fails.
-      });
+      void apiRequest<RfpTicket[]>("/rfp/tickets", { auth: true, cache: "no-store" })
+        .then((rows) => {
+          ticketsRef.current = rows;
+          setTickets(rows);
+          setListError(null);
+        })
+        .catch(() => {
+          // Keep the last successful list while a refresh fails.
+        });
     }, 2000);
     return () => window.clearInterval(timer);
   }, [stillAnalyzing]);
@@ -218,9 +255,19 @@ function RfpIntakeContent() {
         ) : null}
       </div>
 
+      {loadingList ? <p className="text-sm text-slate-600">Loading saved tickets…</p> : null}
+      {listError ? (
+        <p role="alert" className="text-sm text-red-800">
+          {listError}
+        </p>
+      ) : null}
+      {!loadingList && !listError && tickets.length === 0 ? (
+        <p className="text-sm text-slate-600">No saved RFP tickets.</p>
+      ) : null}
+
       {notice ? (
         <p role="status" className="rounded-xl border border-accent bg-white px-4 py-3 text-sm text-foreground">
-          New RFP from {notice.client_name} ({notice.client_country}). Services: {notice.services_requested.join(", ")}.
+          New RFP from {notice.client_name} ({notice.client_country}). Services: {(notice.services_requested ?? []).join(", ")}.
         </p>
       ) : null}
 
@@ -272,22 +319,22 @@ function RfpIntakeContent() {
               <div>
                 <dt className="text-xs uppercase text-slate-500">Readability</dt>
                 <dd>
-                  {ticket.metadata.readability.word_count ?? "—"} words, Flesch{" "}
-                  {ticket.metadata.readability.flesch_reading_ease ?? "—"}
+                  {ticket.metadata.readability?.word_count ?? "—"} words, Flesch{" "}
+                  {ticket.metadata.readability?.flesch_reading_ease ?? "—"}
                 </dd>
               </div>
             </dl>
           ) : null}
-          {ticket.sections.length > 0 ? (
+          {(ticket.sections ?? []).length > 0 ? (
             <ul className="mt-4 space-y-3">
-              {ticket.sections.map((section) => (
+              {(ticket.sections ?? []).map((section) => (
                 <li key={section.department_key} className="rounded-xl bg-panel-soft p-4 text-sm">
                   <p className="font-semibold text-foreground">
                     {section.department_name} — {section.contact}
                   </p>
-                  <p className="mt-1 text-slate-700">{section.key_aspects.join(" ")}</p>
-                  {section.open_questions.length > 0 ? (
-                    <p className="mt-2 text-slate-600">Ask: {section.open_questions.join(" ")}</p>
+                  <p className="mt-1 text-slate-700">{(section.key_aspects ?? []).join(" ")}</p>
+                  {(section.open_questions ?? []).length > 0 ? (
+                    <p className="mt-2 text-slate-600">Ask: {(section.open_questions ?? []).join(" ")}</p>
                   ) : null}
                 </li>
               ))}

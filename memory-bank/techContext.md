@@ -32,7 +32,7 @@ The public website includes:
 
 Backoffice login is handled by the FastAPI app in `services/`. Accounts live in TinyDB, not Postgres. `DATABASE_PATH` defaults to `data/db.json` relative to the process working directory. The local API is started from `services/`, so the file in use is `services/data/db.json`. The repo-root `data/db.json` is a different file. `DATABASE_URL` points at Postgres for inventory, telemetry, RFP, and Support Agent chat sessions. The SQLAlchemy engine keeps a small pool and checks connections before reuse. Chat token text is queued onto that pool instead of opening a connection for every delta. Accounts stay in TinyDB.
 
-The local demo account is `dev@example.com` with role `admin`. Its password is hashed with the existing bcrypt `CryptContext` in `services/routers/auth.py`. Incident Analysis must send that same bearer token; `/api/incidents` rejects a request with no `Authorization` header.
+The local demo account is `dev@example.com` with role `admin`. Its password is hashed with the existing bcrypt `CryptContext` in `services/routers/auth.py`. Incident Analysis must send that same bearer token; `/api/incidents` rejects a request with no `Authorization` header. The `/incidents` page has Incident Manager and CSV Analysis tabs. CSV Analysis posts the uploaded file to `POST /api/incidents/analyze`. The latest aggregate report, filename, and timestamp are stored in the TinyDB table `incident_analysis_reports` and reloaded from `GET /api/incidents/analysis`. Raw CSV rows are not stored.
 
 ## Knowledge retrieval
 
