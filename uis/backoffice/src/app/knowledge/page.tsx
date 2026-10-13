@@ -29,6 +29,15 @@ interface ChatSessionResponse {
   status: string;
 }
 
+const SUGGESTED_QUESTIONS = [
+  "What is TrackFlow’s returns policy?",
+  "Are international returns handled automatically?",
+  "Can you guarantee delivery during Black Friday?",
+  "What approval is needed to offer a storage discount?",
+  "Can we use a carrier that is not listed in the company’s policies?",
+  "What should I do if delivery coverage is not confirmed?",
+] as const;
+
 function lastGeneratingIndex(messages: ChatMessageView[]): number {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -204,11 +213,19 @@ function SupportChat() {
   }, [authenticated, sessionAttempt]);
 
   const generating = messages.some((message) => message.role === "assistant" && message.status === "generating");
+  const suggestionsDisabled = connection !== "open" || generating;
+
+  function sendText(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || !sessionId || !sendRef.current || connection !== "open" || generating) return;
+    setError(null);
+    sendRef.current("user_message", { session_id: sessionId, text: trimmed });
+  }
 
   function sendDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = draft.trim();
-    if (!text || !sessionId || !sendRef.current) return;
+    if (!text || !sessionId || !sendRef.current || connection !== "open") return;
     setError(null);
     if (generating) {
       sendRef.current("interrupt_requested", { session_id: sessionId, new_input: text });
@@ -298,6 +315,29 @@ function SupportChat() {
             {error}
           </div>
         ) : null}
+
+        <div className="mt-6">
+          <p id="suggested-questions-label" className="text-sm font-semibold text-foreground">
+            Suggested questions
+          </p>
+          <div
+            className="mt-2 flex flex-wrap gap-2"
+            role="group"
+            aria-labelledby="suggested-questions-label"
+          >
+            {SUGGESTED_QUESTIONS.map((question) => (
+              <button
+                key={question}
+                type="button"
+                disabled={suggestionsDisabled}
+                onClick={() => sendText(question)}
+                className="max-w-full rounded-full border border-line bg-panel px-4 py-2 text-left text-sm font-semibold text-foreground transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {question}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <form onSubmit={sendDraft} className="mt-6 space-y-3">
           <label htmlFor="cx-message" className="block text-sm font-semibold text-foreground">

@@ -58,7 +58,9 @@ def test_conditional_routing_for_invalid_question_and_missing_context(monkeypatc
         lambda *_args: (_ for _ in ()).throw(AssertionError("must not generate without evidence")),
     )
     no_context = support_agent.run_support_agent("What are TrackFlow's undocumented fees?")
-    assert no_context["answer"] == rag.SAFE_REFUSAL
+    assert "fees" in no_context["answer"].lower()
+    assert "what are" not in no_context["answer"].lower()
+    assert "account team" in no_context["answer"].lower()
     assert [item["node"] for item in no_context["trace"]] == [
         "validate_question",
         "retrieve_context",
@@ -342,7 +344,7 @@ def test_jailbreak_attempt_is_blocked_before_rag_or_mcp(monkeypatch):
     )
 
     assert result["error"] is None
-    assert "TrackFlow logistics support" in result["answer"]
+    assert "I can't ignore TrackFlow's safety rules" in result["answer"]
     assert [entry["node"] for entry in result["trace"]] == [
         "validate_question",
         "guardrail_refusal",
@@ -365,7 +367,7 @@ def test_personal_and_unrelated_requests_are_redirected(monkeypatch):
         "I need personal relationship advice.",
     ):
         result = support_agent.run_support_agent(question)
-        assert "TrackFlow logistics support" in result["answer"]
+        assert "unrelated homework, essays, coding, or personal tasks" in result["answer"]
         assert [entry["node"] for entry in result["trace"]] == [
             "validate_question",
             "guardrail_refusal",
@@ -387,3 +389,24 @@ def test_legitimate_trackflow_request_passes_guardrail(monkeypatch):
         "retrieve_context",
         "generate_answer",
     ]
+
+
+def test_delay_uses_incident_tool_when_present_and_rag_otherwise(monkeypatch):
+    """A delay is not a hardcoded reply. An incident id uses the incident tool."""
+    incident_id = str(uuid4())
+    retrieved = []
+    monkeypatch.setattr(rag, "retrieve", lambda question: retrieved.append(question) or [])
+    monkeypatch.setattr(
+        mcp_tools,
+        "lookup_incident_via_mcp",
+        lambda _incident_id: _mcp_success(incident_id, status="open", category="delay"),
+    )
+
+    without_id = support_agent.run_support_agent("My shipment is delayed. What should I do?")
+    with_id = support_agent.run_support_agent(f"My shipment is delayed. What is the status of incident {incident_id}?")
+
+    assert retrieved == ["My shipment is delayed. What should I do?"]
+    assert [entry["node"] for entry in without_id["trace"]][1] == "retrieve_context"
+    assert "lookup_ticket" not in [entry["node"] for entry in without_id["trace"]]
+    assert [entry["node"] for entry in with_id["trace"]][1] == "lookup_ticket"
+    assert with_id["answer"].startswith(f"Incident {incident_id} is currently 'open'")

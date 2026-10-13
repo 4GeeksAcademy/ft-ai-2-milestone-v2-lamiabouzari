@@ -42,15 +42,24 @@ _OUT_OF_SCOPE_TASKS = re.compile(
 )
 _TRACKFLOW_TOPICS = re.compile(
     r"\b(trackflow|shipment|shipping|tracking|order|track (my |the )?(package|parcel|order)|"
-    r"package|parcel|delivery|deliveries|return|returns|refund|sla|service level|"
+    r"package|parcel|deliver(?:y|ies)|delivers?\s+to|delivering\s+to|return|returns|refund|sla|service level|"
     r"storage|discount|pricing|"
     r"incident|ticket|case|lost (package|parcel|shipment)|failed delivery|wrong address|"
-    r"address change|courier|carriers|carrier|logistics|dispatch)\b",
+    r"address change|courier|carriers|carrier|logistics|dispatch|"
+    r"coverage|service areas?|destinations?|rout(?:e|es|ing)|transit)\b",
     re.IGNORECASE,
 )
 _GUARDRAIL_REDIRECT = (
     "I can help with TrackFlow logistics support, including shipment tracking, returns, "
     "SLA policies, and delivery incidents. Please ask a question about one of those topics."
+)
+_PERSONAL_TASK_REFUSAL = (
+    "Sorry, I can't help with unrelated homework, essays, coding, or personal tasks. "
+    "I can help with TrackFlow shipments, returns, SLAs, or delivery incidents."
+)
+_JAILBREAK_REFUSAL = (
+    "I can't ignore TrackFlow's safety rules or operating instructions. "
+    "I can help with shipments, returns, SLAs, or delivery incidents."
 )
 _SMALL_TALK_REDIRECT = (
     "I can help with TrackFlow shipments, returns, SLAs, or delivery incidents."
@@ -304,10 +313,15 @@ def guardrail_refusal(state: SupportAgentState) -> dict[str, Any]:
     reason = state.get("guardrail_reason") or "out_of_scope"
     guardrail_name, action, failure_type = _GUARDRAIL_EVENTS.get(reason, ("input_scope", "redirect", "content"))
     event = guardrails.record_guardrail(guardrail_name, action, failure_type)
+    question = state.get("question") or ""
     if reason == "unauthorized_order":
         answer = _UNAUTHORIZED_ORDER
     elif reason == "small_talk":
-        answer = _small_talk_answer(state.get("question") or "")
+        answer = _small_talk_answer(question)
+    elif reason == "jailbreak":
+        answer = _JAILBREAK_REFUSAL
+    elif reason == "out_of_scope" and _OUT_OF_SCOPE_TASKS.search(question):
+        answer = _PERSONAL_TASK_REFUSAL
     else:
         answer = _GUARDRAIL_REDIRECT
     output = {
@@ -422,9 +436,11 @@ def generate_answer(state: SupportAgentState) -> dict[str, Any]:
 
 
 def safe_fallback(state: SupportAgentState) -> dict[str, Any]:
-    """Return the RAG safe refusal when evidence is absent or a step failed."""
+    """Say what was not confirmed after retrieval finds no supporting evidence."""
     error = state.get("error")
-    answer = _with_operational_memory(state.get("question", ""), rag.SAFE_REFUSAL)
+    question = state.get("question") or ""
+    base = rag.unconfirmed_answer(question) if question.strip() else rag.SAFE_REFUSAL
+    answer = _with_operational_memory(question, base)
     output = {"answer": answer, "error": error}
     return {"answer": answer, "trace": _trace_entry(state, "safe_fallback", output)}
 

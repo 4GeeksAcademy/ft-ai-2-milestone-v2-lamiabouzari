@@ -36,7 +36,7 @@ The local demo account is `dev@example.com` with role `admin`. Its password is h
 
 ## Knowledge retrieval
 
-Company policy lives in the four Markdown files under `docs/company-knowledge-base/` and is indexed by `python -m data.process.rag`. Retrieval keeps chunks at or above score 0.25. When `OPENAI_API_KEY` is unset, indexing uses a normalized bag-of-words vector over those documents' own vocabulary in the Qdrant collection `trackflow_knowledge`, and answers are the retrieved section text after the existing business safeguards. When the key is set, embedding and generation use the configured OpenAI-compatible models, and those vectors are stored in `trackflow_knowledge_provider` so the local index is not replaced. A question with no supporting chunk still receives the safe refusal.
+Company policy lives in the four Markdown files under `docs/company-knowledge-base/` and is indexed by `python -m data.process.rag`. Retrieval keeps chunks at or above score 0.25. When `OPENAI_API_KEY` is unset, indexing uses a normalized bag-of-words vector over those documents' own vocabulary in the Qdrant collection `trackflow_knowledge`, and answers are a 1–3 sentence customer-support reply composed from the retrieved section after the existing business safeguards. A request for more detail can include more of that section. The reply does not recite staff directives. When the key is set, embedding and generation use the configured OpenAI-compatible models and the same support-style answering instructions, and those vectors are stored in `trackflow_knowledge_provider` so the local index is not replaced. A question with no supporting chunk still receives the safe refusal.
 
 ## Weekly reporting
 
