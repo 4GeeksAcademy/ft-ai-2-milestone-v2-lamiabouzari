@@ -282,6 +282,94 @@ def output_is_sensitive(answer: str, *, owned_order_ids: frozenset[str] | set[st
     return any(order_id not in owned for order_id in _ORDER_MENTION.findall(answer))
 
 
+# Longest sensitive gap is 60 characters, plus the words that complete the pattern.
+_STREAM_HOLD = 96
+_OPEN_MARKERS = (
+    "negotiated",
+    "carrier rate",
+    "carrier rates",
+    "contract rate",
+    "contract rates",
+    "contracted rate",
+    "contracted rates",
+    "commercial",
+    "b2b",
+    "business-to-business",
+    "business to business",
+    "exact warehouse",
+    "warehouse located",
+    "warehouse address",
+    "warehouse is located",
+    "internal route",
+    "internal warehouse",
+    "warehouse route",
+    "system prompt",
+    "developer prompt",
+    "internal instruction",
+    "you are a trackflow",
+    "mandatory trackflow",
+    "[system]",
+    "another customer",
+    "other customer",
+    "different customer",
+    "aisle ",
+    "dock ",
+    "bin ",
+    "order #",
+)
+_TRAILING_ADDRESS = re.compile(
+    r"\b\d{1,6}(?:\s+[A-Za-z0-9][A-Za-z0-9.'-]*){0,6}\s*$",
+)
+_TRAILING_ORDER = re.compile(r"\border\s*#\s*\d{0,12}\s*$", re.IGNORECASE)
+_TRAILING_BRACKET = re.compile(r"\[\s*(?:s(?:y(?:s(?:t(?:e(?:m)?)?)?)?)?)?\s*$", re.IGNORECASE)
+
+
+def stream_release_length(
+    text: str,
+    *,
+    owned_order_ids: frozenset[str] | set[str] = frozenset(),
+) -> int | None:
+    """How many leading characters may leave the server.
+
+    ``None`` means ``output_is_sensitive`` already matches, so nothing further
+    may be published. Otherwise the returned index keeps a suffix that could
+    still grow into one of those same patterns.
+    """
+    if output_is_sensitive(text, owned_order_ids=owned_order_ids):
+        return None
+    if not text:
+        return 0
+    lowered = text.lower()
+    hold_at = len(text)
+    window = max(0, len(text) - _STREAM_HOLD)
+    for marker in _OPEN_MARKERS:
+        index = lowered.rfind(marker, window)
+        if index >= 0 and len(text) - index <= _STREAM_HOLD:
+            hold_at = min(hold_at, index)
+    for pattern in (_TRAILING_ADDRESS, _TRAILING_ORDER, _TRAILING_BRACKET):
+        match = pattern.search(text)
+        if match is not None and match.start() >= window:
+            hold_at = min(hold_at, match.start())
+    partial_at = _marker_prefix_at_end(lowered)
+    if partial_at is not None:
+        hold_at = min(hold_at, partial_at)
+    return hold_at
+
+
+def _marker_prefix_at_end(lowered: str) -> int | None:
+    """Hold a trailing fragment that is the start of a sensitive marker."""
+    start: int | None = None
+    for marker in _OPEN_MARKERS:
+        limit = min(len(marker) - 1, len(lowered))
+        for size in range(limit, 3, -1):
+            if lowered.endswith(marker[:size]):
+                index = len(lowered) - size
+                if start is None or index < start:
+                    start = index
+                break
+    return start
+
+
 def apply_output_guardrail(
     answer: str,
     *,

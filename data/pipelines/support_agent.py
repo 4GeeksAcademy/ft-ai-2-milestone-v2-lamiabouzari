@@ -396,12 +396,21 @@ def retrieve_context(state: SupportAgentState) -> dict[str, Any]:
 
 
 def _streamed_rag_answer(question: str, context: list[dict[str, Any]], sink: Any, cancel: Any) -> str:
-    """Forward model deltas as they arrive, then apply the existing safeguards."""
+    """Forward model deltas as they arrive, then apply the existing safeguards.
+
+    The sink decides whether a delta may be published. Once it blocks the turn,
+    the next model delta is not pulled.
+    """
     if not context:
         return rag.SAFE_REFUSAL
     parts: list[str] = []
-    for delta in rag.iter_model_deltas(question, context):
+    deltas = iter(rag.iter_model_deltas(question, context))
+    while True:
         if cancel is not None and cancel.is_set():
+            break
+        try:
+            delta = next(deltas)
+        except StopIteration:
             break
         parts.append(delta)
         sink(delta)

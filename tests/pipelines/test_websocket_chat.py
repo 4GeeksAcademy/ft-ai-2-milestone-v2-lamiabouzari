@@ -323,6 +323,104 @@ def test_two_subscribers_share_one_agent_run(auth_client, registered_user, chat_
     assert agent.calls == [QUESTION]
 
 
+_CARRIER_RATE = "Our negotiated carrier rate with Carrier X is $4.25 per shipment."
+_RATE_LEAK = "LEAK-AFTER-BLOCK"
+
+
+def _assert_rate_not_exposed(frames: list[dict]) -> None:
+    rendered = str(frames)
+    assert "negotiated" not in rendered.lower()
+    assert "4.25" not in rendered
+    assert _RATE_LEAK not in rendered
+    assert "generation_completed" not in rendered
+    blocked = [frame for frame in frames if frame["event"] == "generation_failed"]
+    assert len(blocked) == 1
+    assert blocked[0]["data"]["message"] == (
+        "I can't share that information. I can help with your shipment tracking, "
+        "returns, SLA policies, and delivery incidents."
+    )
+    assert "negotiated" not in blocked[0]["data"]["message"].lower()
+
+
+def test_negotiated_carrier_rate_stream_never_leaves_the_server(
+    auth_client, registered_user, chat_db, agent, caplog
+):
+    produced: list[str] = []
+
+    def rates(question, context):
+        pieces = (
+            "Our negotiated ",
+            "carrier rate with Carrier X is $4.25 per shipment.",
+            _RATE_LEAK,
+        )
+        for piece in pieces:
+            produced.append(piece)
+            yield piece
+
+    agent.scripts["fn"] = rates
+    token = _login(auth_client)
+    session = _open_session(auth_client, token)
+    session_id = session["session_id"]
+    with caplog.at_level("INFO"):
+        with auth_client.websocket_connect(_ws_url(session_id, token)) as websocket:
+            assert websocket.receive_json()["event"] == "session_snapshot"
+            websocket.send_json(
+                {"event": "user_message", "data": {"session_id": session_id, "text": QUESTION}}
+            )
+            frames = _frames_until(websocket, "generation_failed")
+        with auth_client.websocket_connect(_ws_url(session_id, token)) as again:
+            snapshot = again.receive_json()
+    _assert_rate_not_exposed(frames)
+    assert "".join(produced) == f"{_CARRIER_RATE}{_RATE_LEAK}"[: len("".join(produced))]
+    assert _CARRIER_RATE in "".join(produced)
+    assert _RATE_LEAK not in produced
+    tokens = [frame["data"]["token"] for frame in frames if frame["event"] == "token_chunk"]
+    assert all("negotiated" not in token.lower() and "4.25" not in token for token in tokens)
+    history = store.list_messages(session_id)
+    assistant = [row for row in history if row.role == "assistant"]
+    assert len(assistant) == 1
+    assert assistant[0].status == "failed"
+    assert assistant[0].status != "complete"
+    assert assistant[0].text == frames[-1]["data"]["message"]
+    assert "negotiated" not in assistant[0].text.lower()
+    assert "4.25" not in assistant[0].text
+    assert snapshot["event"] == "session_snapshot"
+    snapshot_text = str(snapshot["data"]["messages"])
+    assert "negotiated" not in snapshot_text.lower()
+    assert "4.25" not in snapshot_text
+    assert assistant[0].text in snapshot_text
+    assert "agent_output_guardrail outcome=blocked reason=output_sensitive" in caplog.text
+    assert "4.25" not in caplog.text
+    assert "negotiated" not in caplog.text.lower()
+    assert agent.calls == [QUESTION]
+
+
+def test_blocked_carrier_rate_reaches_every_subscriber(auth_client, registered_user, chat_db, agent):
+    def rates(question, context):
+        yield "Our negotiated "
+        yield "carrier rate with Carrier X is $4.25 per shipment."
+        yield _RATE_LEAK
+
+    agent.scripts["fn"] = rates
+    token = _login(auth_client)
+    session = _open_session(auth_client, token)
+    session_id = session["session_id"]
+    url = _ws_url(session_id, token)
+    with auth_client.websocket_connect(url) as first, auth_client.websocket_connect(url) as second:
+        assert first.receive_json()["event"] == "session_snapshot"
+        assert second.receive_json()["event"] == "session_snapshot"
+        assert bus.subscriber_count(session_id) == 2
+        first.send_json({"event": "user_message", "data": {"session_id": session_id, "text": QUESTION}})
+        first_frames = _frames_until(first, "generation_failed")
+        second_frames = _frames_until(second, "generation_failed")
+    _assert_rate_not_exposed(first_frames)
+    _assert_rate_not_exposed(second_frames)
+    first_tokens = [frame["data"]["token"] for frame in first_frames if frame["event"] == "token_chunk"]
+    second_tokens = [frame["data"]["token"] for frame in second_frames if frame["event"] == "token_chunk"]
+    assert first_tokens == second_tokens
+    assert agent.calls == [QUESTION]
+
+
 def test_sessions_are_isolated(auth_client, registered_user, chat_db, agent):
     token = _login(auth_client)
     first = _open_session(auth_client, token, "client-a")
