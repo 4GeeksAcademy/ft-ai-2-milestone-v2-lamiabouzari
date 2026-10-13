@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from agent_rate_limit import allow_agent_request
+from data.pipelines import guardrails
 from data.pipelines.support_agent import run_support_agent
 from dependencies import get_current_user
 from model_input import ModelInputError, normalize_model_question
@@ -35,6 +36,27 @@ class AgentQueryResponse(BaseModel):
     error: str | None = None
     trace: list[dict[str, Any]]
     thread_id: str
+
+
+class GuardrailSummaryResponse(BaseModel):
+    """Aggregate trigger counts. No messages, orders, or retrieved text."""
+
+    security: int
+    content: int
+    structural: int
+    redirects: int
+
+
+@router.get("/guardrails/summary", response_model=GuardrailSummaryResponse)
+def guardrail_summary(_user: UserPublic = Depends(get_current_user)) -> GuardrailSummaryResponse:
+    """Return how often each guardrail class has triggered in this process."""
+    summary = guardrails.guardrail_summary()
+    return GuardrailSummaryResponse(
+        security=int(summary["by_failure_type"].get("security", 0)),
+        content=int(summary["by_failure_type"].get("content", 0)),
+        structural=int(summary["by_failure_type"].get("structural", 0)),
+        redirects=int(summary["by_action"].get("redirect", 0)),
+    )
 
 
 @router.post("/query", response_model=AgentQueryResponse)

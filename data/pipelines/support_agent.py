@@ -42,15 +42,40 @@ _OUT_OF_SCOPE_TASKS = re.compile(
 )
 _TRACKFLOW_TOPICS = re.compile(
     r"\b(trackflow|shipment|shipping|tracking|order|track (my |the )?(package|parcel|order)|"
-    r"package|parcel|delivery|deliveries|return|returns|refund|sla|service level|"
+    r"package|parcel|deliver(?:y|ies)|delivers?\s+to|delivering\s+to|return|returns|refund|sla|service level|"
     r"storage|discount|pricing|"
     r"incident|ticket|case|lost (package|parcel|shipment)|failed delivery|wrong address|"
-    r"address change|courier|carriers|carrier|logistics|dispatch)\b",
+    r"address change|courier|carriers|carrier|logistics|dispatch|"
+    r"coverage|service areas?|destinations?|rout(?:e|es|ing)|transit)\b",
     re.IGNORECASE,
 )
 _GUARDRAIL_REDIRECT = (
     "I can help with TrackFlow logistics support, including shipment tracking, returns, "
     "SLA policies, and delivery incidents. Please ask a question about one of those topics."
+)
+_PERSONAL_TASK_REFUSAL = (
+    "Sorry, I can't help with unrelated homework, essays, coding, or personal tasks. "
+    "I can help with TrackFlow shipments, returns, SLAs, or delivery incidents."
+)
+_JAILBREAK_REFUSAL = (
+    "I can't ignore TrackFlow's safety rules or operating instructions. "
+    "I can help with shipments, returns, SLAs, or delivery incidents."
+)
+_SMALL_TALK_REDIRECT = (
+    "I can help with TrackFlow shipments, returns, SLAs, or delivery incidents."
+)
+_SMALL_TALK = re.compile(
+    r"^\s*(?:"
+    r"(?:hi|hello|hey|howdy|yo|good\s+(?:morning|afternoon|evening))(?:\s+there)?"
+    r"(?:(?:\s*[,!.]\s*|\s+)how\s+are\s+you(?:\s+doing)?(?:\s+today)?)?"
+    r"|how\s+are\s+you(?:\s+doing)?(?:\s+today)?"
+    r"|how(?:'s|s|\s+is)\s+it\s+going"
+    r"|how(?:'s|s|\s+is)\s+your\s+day"
+    r"|what(?:'s|s|\s+is)\s+up"
+    r"|thanks(?:\s+so\s+much)?|thank\s+you"
+    r"|goodbye|bye"
+    r")\s*[?!.]*\s*$",
+    re.IGNORECASE,
 )
 _UNAUTHORIZED_ORDER = (
     "You are not authorized to view that order. I can only discuss orders that belong "
@@ -59,6 +84,7 @@ _UNAUTHORIZED_ORDER = (
 _GUARDRAIL_EVENTS = {
     "jailbreak": ("input_jailbreak", "block", "security"),
     "out_of_scope": ("input_scope", "redirect", "content"),
+    "small_talk": ("small_talk", "redirect", "content"),
     "unauthorized_order": ("order_authorization", "block", "security"),
 }
 
@@ -211,6 +237,32 @@ def _scope_guardrail(question: str) -> bool:
     return not _TRACKFLOW_TOPICS.search(question)
 
 
+def _is_small_talk(question: str) -> bool:
+    """Allow a greeting or casual check-in that is not a support or personal task."""
+    if _OUT_OF_SCOPE_TASKS.search(question) or _TRACKFLOW_TOPICS.search(question):
+        return False
+    if _jailbreak_attempt(question):
+        return False
+    return bool(_SMALL_TALK.search(question))
+
+
+def _small_talk_answer(question: str) -> str:
+    """Answer the greeting briefly, then return to TrackFlow support."""
+    if re.search(
+        r"\bhow\s+are\s+you\b|\bhow(?:'s|s|\s+is)\s+it\s+going\b|\bhow(?:'s|s|\s+is)\s+your\s+day\b",
+        question,
+        re.IGNORECASE,
+    ):
+        opening = "I'm doing well, thanks!"
+    elif re.search(r"\bthank(?:s| you)\b", question, re.IGNORECASE):
+        opening = "You're welcome."
+    elif re.search(r"\b(?:goodbye|bye)\b", question, re.IGNORECASE):
+        opening = "Goodbye."
+    else:
+        opening = "Hello!"
+    return f"{opening} {_SMALL_TALK_REDIRECT}"
+
+
 def validate_question(state: SupportAgentState) -> dict[str, Any]:
     """Normalize input and deterministically check security and support scope."""
     question = state.get("question", "").strip()
@@ -221,6 +273,10 @@ def validate_question(state: SupportAgentState) -> dict[str, Any]:
         guardrail_reason = "unauthorized_order"
     elif question and _jailbreak_attempt(question):
         guardrail_reason = "jailbreak"
+    elif question and _OUT_OF_SCOPE_TASKS.search(question):
+        guardrail_reason = "out_of_scope"
+    elif question and _is_small_talk(question):
+        guardrail_reason = "small_talk"
     elif question and _scope_guardrail(question) and not agent_memory.allows_operational_update(question):
         guardrail_reason = "out_of_scope"
     country_enforcement = None
@@ -257,7 +313,17 @@ def guardrail_refusal(state: SupportAgentState) -> dict[str, Any]:
     reason = state.get("guardrail_reason") or "out_of_scope"
     guardrail_name, action, failure_type = _GUARDRAIL_EVENTS.get(reason, ("input_scope", "redirect", "content"))
     event = guardrails.record_guardrail(guardrail_name, action, failure_type)
-    answer = _UNAUTHORIZED_ORDER if reason == "unauthorized_order" else _GUARDRAIL_REDIRECT
+    question = state.get("question") or ""
+    if reason == "unauthorized_order":
+        answer = _UNAUTHORIZED_ORDER
+    elif reason == "small_talk":
+        answer = _small_talk_answer(question)
+    elif reason == "jailbreak":
+        answer = _JAILBREAK_REFUSAL
+    elif reason == "out_of_scope" and _OUT_OF_SCOPE_TASKS.search(question):
+        answer = _PERSONAL_TASK_REFUSAL
+    else:
+        answer = _GUARDRAIL_REDIRECT
     output = {
         "answer": answer,
         "reason": reason,
@@ -370,9 +436,11 @@ def generate_answer(state: SupportAgentState) -> dict[str, Any]:
 
 
 def safe_fallback(state: SupportAgentState) -> dict[str, Any]:
-    """Return the RAG safe refusal when evidence is absent or a step failed."""
+    """Say what was not confirmed after retrieval finds no supporting evidence."""
     error = state.get("error")
-    answer = _with_operational_memory(state.get("question", ""), rag.SAFE_REFUSAL)
+    question = state.get("question") or ""
+    base = rag.unconfirmed_answer(question) if question.strip() else rag.SAFE_REFUSAL
+    answer = _with_operational_memory(question, base)
     output = {"answer": answer, "error": error}
     return {"answer": answer, "trace": _trace_entry(state, "safe_fallback", output)}
 

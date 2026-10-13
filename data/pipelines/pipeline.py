@@ -16,11 +16,6 @@ from sqlalchemy import text
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _ENV_FILE = _REPO_ROOT / "services" / ".env"
-if _ENV_FILE.exists():
-    from dotenv import load_dotenv
-
-    load_dotenv(_ENV_FILE)
-
 _SERVICES_DIR = _REPO_ROOT / "services"
 if str(_SERVICES_DIR) not in sys.path:
     sys.path.insert(0, str(_SERVICES_DIR))
@@ -317,7 +312,20 @@ def weekly_warehouse_client_performance_pipeline(
         raise
 
 
+def _load_local_env() -> None:
+    """Load services/.env when this pipeline is executed, not when it is imported.
+
+    Importing the transform for tests must not publish provider credentials into
+    the process. ``python -m data.pipelines.pipeline`` still loads the same file.
+    """
+    if _ENV_FILE.exists():
+        from dotenv import load_dotenv
+
+        load_dotenv(_ENV_FILE)
+
+
 def main() -> None:
+    _load_local_env()
     parser = argparse.ArgumentParser(description="Run the weekly performance pipeline")
     parser.add_argument("--week-start", type=date.fromisoformat, help="Monday in YYYY-MM-DD format")
     parser.add_argument("--triggered-by", default="cli", help="Run trigger identifier")
