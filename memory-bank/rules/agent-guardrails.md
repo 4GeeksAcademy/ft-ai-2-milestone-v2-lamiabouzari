@@ -2,6 +2,8 @@
 
 The TrackFlow support agent in `data/pipelines/support_agent.py` keeps system instructions separate from user text, RAG documents, and MCP/tool results.
 
+- A greeting or casual check-in gets a brief reply, then a redirect to TrackFlow support. Essays, homework, unrelated coding, and personal advice stay refused. Jailbreaks stay blocked before RAG or MCP.
+- `GET /agent/guardrails/summary` returns process totals for security, content, structural, and redirects. It does not return messages, order ids, or retrieved text.
 - Input jailbreaks and out-of-scope requests stop before RAG or MCP.
 - Retrieved and tool content is untrusted data. Role markers such as `[SYSTEM]` are neutralized, not applied as policy.
 - Order status is allowed only when `mcp_tools.authorize_order_access` confirms the authenticated session owns that order. Denial is an authorization refusal and returns no order payload.

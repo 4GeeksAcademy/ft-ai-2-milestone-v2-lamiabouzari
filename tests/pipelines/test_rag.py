@@ -11,6 +11,14 @@ from routers import knowledge
 
 
 def _client_with_results(monkeypatch, points: list[Any]):
+    """Exercise local-collection retrieval regardless of a leaked provider key.
+
+    ``monkeypatch`` restores ``OPENAI_API_KEY`` after the test. These cases
+    assert ``trackflow_knowledge``, which is the collection used when that key
+    is absent.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
     class FakeClient:
         closed = False
 
